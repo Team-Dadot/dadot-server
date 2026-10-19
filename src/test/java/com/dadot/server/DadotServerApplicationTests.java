@@ -1,10 +1,10 @@
-package com.team4.server;
+package com.dadot.server;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class Team4ServerApplicationTests {
+class DadotServerApplicationTests {
 
     @Test
     void contextLoads() {

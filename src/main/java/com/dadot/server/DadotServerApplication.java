@@ -1,13 +1,13 @@
-package com.team4.server;
+package com.dadot.server;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class Team4ServerApplication {
+public class DadotServerApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(Team4ServerApplication.class, args);
+        SpringApplication.run(DadotServerApplication.class, args);
     }
 
 }

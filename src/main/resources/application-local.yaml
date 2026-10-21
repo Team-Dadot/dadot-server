@@ -1,0 +1,9 @@
+spring:
+  config:
+    import: "optional:file:./.env[.properties]"
+
+  datasource:
+    url: "jdbc:mariadb://127.0.0.1:${DB_PORT:3307}/${DB_NAME:dadot_db}"
+    username: ${DB_USERNAME:dadot_app}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.mariadb.jdbc.Driver

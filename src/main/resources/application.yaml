@@ -35,6 +35,6 @@ management:
     health:
       show-details: never
 
-  logging:
-    level:
-      org.hibernate.orm.connections.pooling: WARN
+logging:
+  level:
+    org.hibernate.orm.connections.pooling: WARN

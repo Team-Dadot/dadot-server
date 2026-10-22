@@ -32,15 +32,21 @@ public class VerificationMaintenance {
                 ZoneOffset.UTC
         );
 
-        jdbc.update(
-                """
-                delete from auth_request_guards
-                where expires_at < ?
-                order by expires_at
-                limit 1000
-                """,
-                now
-        );
+        int deleted;
+        int rounds = 0;
+
+        do {
+            deleted = jdbc.update(
+                    """
+                    delete from auth_request_guards
+                    where expires_at < ?
+                    order by expires_at
+                    limit 1000
+                    """,
+                    now
+            );
+            rounds++;
+        } while (deleted == 1000 && rounds < 20);
 
         jdbc.update(
                 """

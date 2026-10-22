@@ -2,6 +2,10 @@ spring:
   application:
     name: dadot-server
 
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+
   jpa:
     open-in-view: false
     hibernate:
@@ -20,9 +24,29 @@ spring:
     init:
       mode: never
 
+  jackson:
+    time-zone: UTC
+    default-property-inclusion: always
+
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+        one-indexed-parameters: false
+
 server:
   port: 8080
   shutdown: graceful
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
 
 management:
   endpoints:
@@ -35,6 +59,20 @@ management:
     health:
       show-details: never
 
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+  paths-to-match:
+    - /v1/**
+  override-with-generic-response: false
+
+app:
+  cors:
+    allowed-origins: []
+
 logging:
   level:
+    root: INFO
     org.hibernate.orm.connections.pooling: WARN

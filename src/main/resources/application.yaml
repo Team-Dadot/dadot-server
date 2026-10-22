@@ -12,6 +12,8 @@ spring:
       ddl-auto: validate
     properties:
       hibernate:
+        type:
+          java_time_use_direct_jdbc: true
         jdbc:
           time_zone: UTC
 
@@ -69,6 +71,11 @@ springdoc:
   override-with-generic-response: false
 
 app:
+  email-verification:
+    hmac-secret-base64: ${AUTH_VERIFICATION_HMAC_SECRET}
+    from-address: ${MAIL_FROM}
+    ip-per-minute: 10
+    ip-per-hour: 50
   cors:
     allowed-origins: []
 

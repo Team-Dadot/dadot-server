@@ -4,3 +4,16 @@ spring:
     username: ${TEST_DB_USERNAME}
     password: ${TEST_DB_PASSWORD}
     driver-class-name: org.mariadb.jdbc.Driver
+
+  mail:
+    host: localhost
+    port: 1025
+
+app:
+  email-verification:
+    # 테스트 전용 공개 값. 운영 키로 사용하지 않는다.
+    hmac-secret-base64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    from-address: test@example.invalid
+    ip-per-minute: 10
+    ip-per-hour: 50
+    maintenance-enabled: false

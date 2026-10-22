@@ -48,6 +48,18 @@ public enum ErrorCode {
             HttpStatus.INTERNAL_SERVER_ERROR,
             "서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
     ),
+    EMAIL_ALREADY_REGISTERED(
+            HttpStatus.CONFLICT,
+            "가입된 이메일입니다."
+    ),
+    RATE_LIMITED(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "잠시 후 인증번호를 다시 요청해 주세요."
+    ),
+    IDEMPOTENCY_CONFLICT(
+            HttpStatus.CONFLICT,
+            "동일 요청 키에 다른 내용이 전달되었거나 재사용할 수 없는 키입니다."
+    ),
     SERVICE_UNAVAILABLE(
             HttpStatus.SERVICE_UNAVAILABLE,
             "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요."
@@ -72,4 +84,5 @@ public enum ErrorCode {
     public String getMessage() {
         return message;
     }
+
 }

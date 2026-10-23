@@ -62,7 +62,7 @@ public class LoginAttemptLimiter {
         ), ipPerHour);
 
         limits.put(crypto.hmac(
-                "login-email-ten-minutes", email,
+                "login-ip-email-ten-minutes", remoteAddress, email,
                 Long.toString(Math.floorDiv(seconds, 600))
         ), emailPerTenMinutes);
 

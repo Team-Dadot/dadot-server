@@ -7,14 +7,15 @@ import org.springframework.dao.TransientDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationServiceException;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
-import java.time.*;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
 
@@ -88,9 +89,10 @@ public class SessionJwtAuthenticationConverter
                 throw invalidToken();
             }
 
-            return UsernamePasswordAuthenticationToken.authenticated(
+            return new SessionAuthenticationToken(
                     new UserPrincipal(userId),
-                    null,
+                    sessionId,
+                    version.intValue(),
                     List.of(
                             new SimpleGrantedAuthority(
                                     "ROLE_" + roles.getFirst()

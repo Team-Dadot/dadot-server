@@ -4,6 +4,23 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    INVALID_VERIFICATION_TOKEN(
+            HttpStatus.UNAUTHORIZED,
+            "이메일 인증을 다시 진행해 주세요."
+    ),
+    TERMS_NOT_ACCEPTED(
+            HttpStatus.BAD_REQUEST,
+            "필수 이용약관에 동의해 주세요."
+    ),
+    TERMS_CHANGED(
+            HttpStatus.CONFLICT,
+            "이용약관이 변경되었습니다. 최신 내용을 확인해 주세요."
+    ),
+    SIGNUP_TERMS_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "가입 약관을 준비 중입니다. 잠시 후 다시 시도해 주세요."
+    ),
+
     INVALID_VERIFICATION_CODE(
             HttpStatus.BAD_REQUEST,
             "인증번호가 올바르지 않습니다."

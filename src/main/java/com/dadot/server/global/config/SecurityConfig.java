@@ -1,6 +1,7 @@
 package com.dadot.server.global.config;
 
 import com.dadot.server.global.security.SecurityExceptionHandler;
+import com.dadot.server.global.security.SessionJwtAuthenticationConverter;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -24,14 +25,18 @@ public class SecurityConfig {
             HttpSecurity http,
             CorsConfigurationSource corsConfigurationSource,
             SecurityExceptionHandler exceptionHandler,
+            SessionJwtAuthenticationConverter jwtAuthentication,
             @Value("${springdoc.api-docs.enabled:false}")
             boolean apiDocsEnabled
     ) throws Exception {
+
         http
                 .csrf(AbstractHttpConfigurer::disable)
 
                 .cors(cors ->
-                        cors.configurationSource(corsConfigurationSource)
+                        cors.configurationSource(
+                                corsConfigurationSource
+                        )
                 )
 
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -50,9 +55,21 @@ public class SecurityConfig {
                         .accessDeniedHandler(exceptionHandler)
                 )
 
+                .oauth2ResourceServer(resource -> resource
+                        .jwt(jwt ->
+                                jwt.jwtAuthenticationConverter(
+                                        jwtAuthentication
+                                )
+                        )
+                        .authenticationEntryPoint(exceptionHandler)
+                        .accessDeniedHandler(exceptionHandler)
+                )
+
                 .authorizeHttpRequests(authorize -> {
                     authorize
-                            .dispatcherTypeMatchers(DispatcherType.ERROR)
+                            .dispatcherTypeMatchers(
+                                    DispatcherType.ERROR
+                            )
                             .permitAll();
 
                     authorize

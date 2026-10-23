@@ -3,6 +3,10 @@ package com.dadot.server.global.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+    INVALID_CREDENTIALS(
+            HttpStatus.UNAUTHORIZED,
+            "이메일 또는 비밀번호를 확인해 주세요."
+    ),
 
     INVALID_VERIFICATION_TOKEN(
             HttpStatus.UNAUTHORIZED,
@@ -84,7 +88,7 @@ public enum ErrorCode {
     ),
     RATE_LIMITED(
             HttpStatus.TOO_MANY_REQUESTS,
-            "잠시 후 인증번호를 다시 요청해 주세요."
+            "요청이 많습니다. 잠시 후 다시 시도해 주세요."
     ),
     IDEMPOTENCY_CONFLICT(
             HttpStatus.CONFLICT,

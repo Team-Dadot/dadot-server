@@ -71,13 +71,22 @@ springdoc:
   override-with-generic-response: false
 
 app:
+  jwt:
+    secret-base64: ${JWT_SECRET_BASE64}
+
+  links:
+    privacy-policy-url: ${PRIVACY_POLICY_URL}
+    inquiry-form-url: ${INQUIRY_FORM_URL}
+
   auth-proof:
     encryption-key-base64: ${AUTH_PROOF_ENCRYPTION_KEY}
+
   email-verification:
     hmac-secret-base64: ${AUTH_VERIFICATION_HMAC_SECRET}
     from-address: ${MAIL_FROM}
     ip-per-minute: 10
     ip-per-hour: 50
+
   cors:
     allowed-origins: []
 

@@ -10,8 +10,16 @@ spring:
     port: 1025
 
 app:
+  jwt:
+    # 테스트 전용 공개 값
+    secret-base64: AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=
+
+  links:
+    privacy-policy-url: https://example.invalid/privacy
+    inquiry-form-url: https://example.invalid/inquiry
+
   auth-proof:
-    # 테스트 전용 공개 값. 운영 키로 사용하지 않는다.
+    # 테스트 전용 공개 값
     encryption-key-base64: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
 
   email-verification:

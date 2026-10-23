@@ -50,6 +50,8 @@ public class VerificationMaintenance {
 
         } while (deleted == 1000 && rounds < 20);
 
+        // 만료된 응답 데이터는 제거하고,
+        // 중복 실행 방지를 위한 키 해시와 요청 기록은 유지한다.
         jdbc.update(
                 """
                 update api_idempotency_requests
@@ -57,7 +59,8 @@ public class VerificationMaintenance {
                     encrypted_response = null,
                     response_key_version = null
                 where (
-                    operation = 'POST /v1/auth/email-verifications'
+                    operation = 'POST /v1/auth/signup'
+                    or operation = 'POST /v1/auth/email-verifications'
                     or operation like 'POST /v1/auth/email-verifications/%/verify'
                 )
                   and expires_at < ?

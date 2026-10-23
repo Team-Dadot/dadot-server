@@ -45,7 +45,9 @@ public class VerificationMaintenance {
                     """,
                     now
             );
+
             rounds++;
+
         } while (deleted == 1000 && rounds < 20);
 
         jdbc.update(
@@ -54,9 +56,15 @@ public class VerificationMaintenance {
                 set response_payload = null,
                     encrypted_response = null,
                     response_key_version = null
-                where operation = 'POST /v1/auth/email-verifications'
+                where (
+                    operation = 'POST /v1/auth/email-verifications'
+                    or operation like 'POST /v1/auth/email-verifications/%/verify'
+                )
                   and expires_at < ?
-                  and response_payload is not null
+                  and (
+                      response_payload is not null
+                      or encrypted_response is not null
+                  )
                 limit 1000
                 """,
                 now

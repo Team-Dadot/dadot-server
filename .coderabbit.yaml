@@ -1,24 +1,26 @@
-# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
-
 language: ko-KR
 early_access: false
 enable_free_tier: true
 
 tone_instructions: |
-  정중하고 명확한 한국어로 리뷰하세요. 버그와 개선 제안을 구분하고,
-  재현 조건·영향·수정 방향을 설명하세요. 코드 예시는 Java로 작성하세요.
+  간결한 한국어로 리뷰하세요. 문제의 발생 조건·영향·최소 수정 방향만 설명하세요.
+  코드 예시가 필요하면 Java로 작성하세요.
 
 reviews:
-  profile: chill
+  profile: quiet
   request_changes_workflow: true
-  high_level_summary: true
-  high_level_summary_in_walkthrough: true
+
+  high_level_summary: false
+  changed_files_summary: false
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  assess_linked_issues: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
   poem: false
   in_progress_fortune: false
-  review_status: true
   collapse_walkthrough: true
-  assess_linked_issues: true
-  related_prs: true
   abort_on_close: true
 
   auto_review:
@@ -26,8 +28,7 @@ reviews:
     auto_incremental_review: true
     drafts: false
     base_branches:
-      - "^main$"
-      - "^develop$"
+      - ".*"
 
   path_filters:
     - "!**/build/**"
@@ -35,107 +36,29 @@ reviews:
     - "!**/gradle-wrapper.jar"
 
   path_instructions:
-    - path: "src/main/java/**/*.java"
+    - path: "**/*"
       instructions: |
-        - Java 21, Spring Boot 4, Spring Security, MariaDB, Flyway 프로젝트입니다.
-        - JSON 처리는 프로젝트의 Jackson 3 구성을 기준으로 검토하세요.
-        - 도메인별 패키지, 공통 기술 코드 global, 외부 연동 infrastructure 구조를 따릅니다.
-        - 버그, 보안, 데이터 정합성, 성능을 우선하고 취향에 따른 포맷 변경은 줄이세요.
-        - PR·연결 이슈·저장소 문서에서 확인되는 정책을 근거로 검토하세요.
-        - 확인할 수 없는 정책은 가정으로 명시하고 구현을 임의로 요구하지 마세요.
-        - 현재 PR 범위와 후속 개발 범위를 구분하세요.
-        - 단독 개발 규모에 비해 불필요한 계층·추상화·의존성 추가를 요구하지 마세요.
-
-    - path: "src/main/java/**/controller/**/*.java"
-      instructions: |
-        - 입력 검증, HTTP 메서드, 상태 코드, 인증·권한 검사를 확인하세요.
-        - API 경로는 프로젝트의 /v1 규칙을 따릅니다.
-        - Controller가 Repository를 직접 호출하거나 비즈니스 로직을 처리하는지 검토하세요.
-        - 응답은 ApiResponse<T>와 요청·응답 DTO를 사용하고 Entity를 직접 반환하지 않습니다.
-        - ResponseEntity 사용 자체를 문제 삼지 말고 상태·헤더·본문의 정확성을 검토하세요.
-        - 204 응답에는 JSON을 포함한 본문이 없어야 합니다.
-        - Swagger 설명과 실제 요청·응답·인증 조건이 일치하는지 확인하세요.
-
-    - path: "src/main/java/**/service/**/*.java"
-      instructions: |
-        - 트랜잭션 경계, 프록시를 거치지 않는 자기 호출, 롤백 동작을 확인하세요.
-        - 조회 전용 여부는 잠금·쓰기·호출 경로를 고려하여 판단하세요.
-        - 조회 후 저장 사이의 경합, 중복 요청, 동일 자원 동시 변경을 확인하세요.
-        - 외부 호출의 타임아웃, 재시도 중복, DB 커밋과 부수효과 사이의 장애를 검토하세요.
-        - 외부 호출을 트랜잭션 안팎으로 옮기는 제안에는 유실·중복·복구 영향을 설명하세요.
-        - DB 잠금이 필요한 구간에 synchronized만으로 충분하다고 가정하지 마세요.
-        - 비밀정보·인증번호·사용자 원문이 로그나 예외에 노출되는지 확인하세요.
-
-    - path: "src/main/java/**/repository/**/*.java"
-      instructions: |
-        - JPA와 JdbcTemplate 모두 사용 가능합니다. 특정 방식으로의 통일을 강요하지 마세요.
-        - SQL 파라미터 바인딩, 조인 조건, 소유권 조건, 잠금 및 인덱스를 확인하세요.
-        - N+1, 불필요한 전체 조회, 과도한 쿼리와 페이징 문제를 검토하세요.
-        - 동일 DataSource의 JPA·JDBC가 의도한 트랜잭션에 참여하는지 확인하세요.
-        - 시간 값은 UTC 저장 원칙과 일치하는지 확인하세요.
-
-    - path: "src/main/java/**/entity/**/*.java"
-      instructions: |
-        - Flyway의 컬럼 타입·길이·nullable·enum·FK·유일성 제약과 매핑이 일치하는지 확인하세요.
-        - BaseTimeEntity는 created_at과 updated_at이 모두 있는 엔티티에만 적용합니다.
-        - 무분별한 setter, 연관관계 순환, 의도하지 않은 cascade 삭제를 검토하세요.
-        - 개인정보와 인증 정보가 toString으로 노출되는지 확인하세요.
-
-    - path: "src/main/java/**/domain/auth/**/*.java"
-      instructions: |
-        - SIGN_UP·PASSWORD_RESET의 이메일 인증 요청은 비로그인으로 허용합니다.
-        - PASSWORD_CHANGE는 검증된 로그인 사용자와 현재 계정 이메일을 확인해야 합니다.
-        - 이메일 인증 증빙과 로그인용 accessToken의 목적을 혼동하지 마세요.
-        - 인증번호는 HMAC, 고엔트로피 일회용 증빙은 해시 저장 여부를 확인하세요.
-        - 만료·소비·무효화·시도 횟수·재발송 제한·목적·이메일·회원 바인딩을 확인하세요.
-        - Idempotency-Key 재시도, 본문 불일치, 동시 접수와 업무 변경의 원자성을 확인하세요.
-        - 비밀번호 재설정에서 응답·오류·발송 동작으로 계정 존재 여부가 노출되는지 검토하세요.
-        - 소셜 이메일만으로 계정을 자동 병합하지 않는지 확인하세요.
-
-    - path: "src/main/java/**/global/security/**/*.java"
-      instructions: |
-        - 구현된 토큰 인증의 서명·알고리즘·만료·발급자·대상 검증을 확인하세요.
-        - 세션 폐기·회원 상태·auth_version과 권한·리소스 소유권 검사를 확인하세요.
-        - JWT는 발급 후 1시간이며 현재 명세에 refreshToken이나 재발급 API는 없습니다.
-        - 인증 실패 401, 권한 부족 403과 공통 오류 응답을 확인하세요.
-        - 공개 API를 모두 로그인 필수로 변경하는 제안을 하지 마세요.
-
-    - path: "src/main/resources/db/migration/*.sql"
-      instructions: |
-        - MariaDB 및 Flyway 기준으로 문법과 변경 순서를 검토하세요.
-        - 이미 공유·적용된 migration 수정 대신 후속 버전을 추가해야 하는지 확인하세요.
-        - 기존 데이터의 NOT NULL·UNIQUE·FK 위반과 배포 호환성을 검토하세요.
-        - 복합 FK, NULL 포함 UNIQUE, 문자열 비교 및 인덱스의 실제 의미를 확인하세요.
-        - 데이터 삭제·변환이 있다면 영향과 복구 방법을 확인하세요.
-
-    - path: "src/test/**/*.java"
-      instructions: |
-        - 성공·실패·경계값과 필요한 동시성·롤백 검증이 있는지 확인하세요.
-        - 테스트가 구현을 그대로 따라 쓰기보다 계약과 비즈니스 규칙을 검증하는지 확인하세요.
-        - 외부 연동 대역 테스트와 실제 외부 연동 검증을 구분하세요.
-        - 데이터 삭제 테스트는 전용 테스트 DB에서만 실행되도록 확인하세요.
-        - JaCoCo 최소 커버리지 게이트는 현재 없으므로 임의의 필수 수치를 요구하지 마세요.
-
-    - path: "**/application*.yaml"
-      instructions: |
-        - 실제 비밀 값 대신 환경변수 참조를 사용하는지 확인하세요.
-        - local·test·prod 간 설정과 테스트의 외부 서비스 의존성을 확인하세요.
-        - 운영 Swagger 노출, 민감정보 로그, 타임아웃과 필수 설정 누락을 검토하세요.
-        - ddl-auto는 validate이며 테이블 변경은 Flyway로 관리합니다.
+        - 확인 가능한 버그와 보안·데이터 손실 위험에 집중하세요.
+        - 비밀번호·API 키·토큰·인증번호의 코드, 설정, 로그 노출을 확인하세요.
+        - 인증 우회, 권한·소유권 누락, 입력값 검증 누락과 인젝션을 확인하세요.
+        - 중복 실행, 동시성, 트랜잭션 롤백과 파괴적인 DB 변경을 확인하세요.
+        - 실제 장애로 이어지는 성능 문제만 지적하세요.
+        - 포맷, 이름 취향, 단순 주석, 불필요한 리팩터링 제안은 생략하세요.
+        - PR 범위 밖의 미구현 기능이나 확인되지 않은 명세를 요구하지 마세요.
+        - 의도된 정책은 코드·테스트·저장소 문서를 확인한 후 판단하세요.
+        - 같은 문제는 반복하지 말고 한 번만 설명하세요.
 
   tools:
-    github-checks:
-      enabled: true
     gitleaks:
       enabled: true
-    shellcheck:
+    semgrep:
       enabled: true
-    hadolint:
-      enabled: true
-    yamllint:
+    github-checks:
       enabled: true
     markdownlint:
-      enabled: true
+      enabled: false
+    yamllint:
+      enabled: false
     languagetool:
       enabled: false
 

@@ -4,6 +4,19 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    INVALID_VERIFICATION_CODE(
+            HttpStatus.BAD_REQUEST,
+            "인증번호가 올바르지 않습니다."
+    ),
+    VERIFICATION_EXPIRED(
+            HttpStatus.GONE,
+            "인증번호 또는 인증 증빙이 만료되었거나 사용할 수 없습니다."
+    ),
+    VERIFICATION_ATTEMPTS_EXCEEDED(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "인증 시도 횟수를 초과했습니다."
+    ),
+
     IMAGE_TOO_LARGE(
             HttpStatus.CONTENT_TOO_LARGE,
             "프로필 이미지는 5MiB 이하여야 합니다."

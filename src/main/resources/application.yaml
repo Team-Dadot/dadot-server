@@ -71,6 +71,8 @@ springdoc:
   override-with-generic-response: false
 
 app:
+  auth-proof:
+    encryption-key-base64: ${AUTH_PROOF_ENCRYPTION_KEY}
   email-verification:
     hmac-secret-base64: ${AUTH_VERIFICATION_HMAC_SECRET}
     from-address: ${MAIL_FROM}

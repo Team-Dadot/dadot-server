@@ -10,8 +10,11 @@ spring:
     port: 1025
 
 app:
-  email-verification:
+  auth-proof:
     # 테스트 전용 공개 값. 운영 키로 사용하지 않는다.
+    encryption-key-base64: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+
+  email-verification:
     hmac-secret-base64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     from-address: test@example.invalid
     ip-per-minute: 10

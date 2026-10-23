@@ -71,6 +71,8 @@ springdoc:
   override-with-generic-response: false
 
 app:
+  kakao:
+    app-id: ${KAKAO_APP_ID:0}
   jwt:
     secret-base64: ${JWT_SECRET_BASE64}
 

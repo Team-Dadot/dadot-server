@@ -3,6 +3,21 @@ package com.dadot.server.global.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+
+    INVALID_REGISTRATION_TOKEN(
+            HttpStatus.UNAUTHORIZED,
+            "소셜 인증을 다시 진행해 주세요."
+    ),
+
+    SOCIAL_ACCOUNT_ALREADY_REGISTERED(
+            HttpStatus.CONFLICT,
+            "이미 가입된 계정입니다. 소셜 로그인을 다시 진행해 주세요."
+    ),
+
+    INVALID_SOCIAL_CREDENTIAL(
+            HttpStatus.UNAUTHORIZED,
+            "소셜 로그인을 다시 진행해 주세요."
+    ),
     INVALID_CREDENTIALS(
             HttpStatus.UNAUTHORIZED,
             "이메일 또는 비밀번호를 확인해 주세요."

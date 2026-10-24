@@ -3,6 +3,10 @@ package com.dadot.server.global.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+    PASSWORD_AUTH_UNAVAILABLE(
+            HttpStatus.CONFLICT,
+            "이메일 로그인 계정에서만 변경할 수 있습니다."
+    ),
 
     INVALID_REGISTRATION_TOKEN(
             HttpStatus.UNAUTHORIZED,

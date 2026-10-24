@@ -53,7 +53,7 @@ public class OnboardingRequestStore {
                 select user_id, body_hmac, status, response_http_status,
                     response_payload, expires_at
                 from api_idempotency_requests
-                where scope_hash = ? and operation = ? and key_hash = ? for update
+                where scope_hash = ? and operation = ? and key_hash = ?
                 """,
                 (rs, row) -> {
                     if (!key.bodyHmac().equals(rs.getString("body_hmac"))) {

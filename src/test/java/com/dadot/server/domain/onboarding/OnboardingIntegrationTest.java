@@ -1051,6 +1051,67 @@ class OnboardingIntegrationTest {
                 .andExpect(jsonPath("$.error.code").value("INTERNAL_SERVER_ERROR"));
     }
 
+    @Test
+    void completesDifferentUsersAfterBothMissingKeyLookups() throws Exception {
+        ready();
+        long otherUser = member();
+        String otherSession = session(otherUser);
+
+        for (var input : List.of(
+                Map.entry("COMPANIES", Map.of("companyIds", List.of(secondCompany))),
+                Map.entry("JOBS", Map.of("assignments", List.of(
+                        assignment(secondCompany, Map.of("customName", "기획"))))),
+                Map.entry("DATES", Map.of("dates", List.of(date(secondCompany, null)))),
+                Map.entry("EXPERIENCE", Map.of("experienceIds", List.of())),
+                Map.entry("NOTIFICATION_GUIDANCE", Map.of("guidanceCompleted", true))
+        )) {
+            long version = service.get(otherUser, otherSession, 0).version();
+
+            service.save(
+                    otherUser,
+                    otherSession,
+                    0,
+                    request(input.getKey(), version, input.getValue())
+            );
+        }
+
+        // 전용 테스트 DB에서 동일한 빈 인덱스 구간을 확실히 만든다.
+        jdbc.update("delete from api_idempotency_requests");
+        var bothLookups = new CountDownLatch(2);
+
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            assertTrue(((java.util.Optional<?>) result).isEmpty());
+            bothLookups.countDown();
+            assertTrue(bothLookups.await(5, TimeUnit.SECONDS));
+            return result;
+        }).when(requests).replay(any(), anyLong(), any());
+
+        String firstKey = key();
+        String otherKey = key();
+
+        var result = concurrent(
+                () -> complete(firstKey),
+                () -> service.complete(otherUser, otherSession, 0, otherKey)
+        );
+
+        assertTrue(result.get(0).completed());
+        assertTrue(result.get(1).completed());
+        assertEquals(2, count("user_companies"));
+
+        assertEquals(1L, jdbc.queryForObject(
+                "select count(*) from user_companies where user_id = ?",
+                Long.class,
+                otherUser
+        ));
+
+        assertEquals(2L, jdbc.queryForObject(
+                "select count(*) from api_idempotency_requests where operation = ?",
+                Long.class,
+                OnboardingRequestStore.OPERATION
+        ));
+    }
+
     private void ready() {
         chooseCompanies();
         chooseJobs();

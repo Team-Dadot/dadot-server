@@ -3,6 +3,19 @@ package com.dadot.server.global.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+    ONBOARDING_INCOMPLETE(
+            HttpStatus.CONFLICT,
+            "기업과 직무 등 필수 단계를 확인해 주세요."
+    ),
+    VERSION_CONFLICT(
+            HttpStatus.CONFLICT,
+            "온보딩 정보가 변경되었습니다. 다시 조회해 주세요."
+    ),
+    IDEMPOTENCY_KEY_EXPIRED(
+            HttpStatus.CONFLICT,
+            "요청 키가 만료되었습니다. 새 요청 키를 사용해 주세요."
+    ),
+
     PASSWORD_AUTH_UNAVAILABLE(
             HttpStatus.CONFLICT,
             "이메일 로그인 계정에서만 변경할 수 있습니다."
@@ -137,5 +150,4 @@ public enum ErrorCode {
     public String getMessage() {
         return message;
     }
-
 }

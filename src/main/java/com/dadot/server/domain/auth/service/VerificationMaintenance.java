@@ -68,7 +68,8 @@ public class VerificationMaintenance {
                     encrypted_response = null,
                     response_key_version = null
                 where (
-                    operation = 'POST /v1/auth/social/apple'
+                    operation = 'POST /v1/users/me/onboarding/complete'
+                    or operation = 'POST /v1/auth/social/apple'
                     or operation = 'POST /v1/auth/social/signup'
                     or operation = 'POST /v1/auth/social/kakao'
                     or operation = 'POST /v1/auth/signup'

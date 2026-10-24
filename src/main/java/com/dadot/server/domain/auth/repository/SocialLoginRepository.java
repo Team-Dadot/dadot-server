@@ -15,15 +15,19 @@ public class SocialLoginRepository {
 
     private final JdbcTemplate jdbc;
 
-    public Optional<Long> findUser(String subject) {
+    public Optional<Long> findUser(
+            String provider,
+            String subject
+    ) {
         return jdbc.query(
                 """
                 select user_id
                 from auth_identities
-                where provider = 'KAKAO'
+                where provider = ?
                   and provider_subject = ?
                 """,
                 (rs, row) -> rs.getLong("user_id"),
+                provider,
                 subject
         ).stream().findFirst();
     }
@@ -57,18 +61,20 @@ public class SocialLoginRepository {
 
     public boolean lockIdentity(
             long userId,
+            String provider,
             String subject
     ) {
         return !jdbc.query(
                 """
                 select id
                 from auth_identities
-                where provider = 'KAKAO'
+                where provider = ?
                   and provider_subject = ?
                   and user_id = ?
                 for update
                 """,
                 (rs, row) -> rs.getLong("id"),
+                provider,
                 subject,
                 userId
         ).isEmpty();
@@ -99,7 +105,9 @@ public class SocialLoginRepository {
 
     public void createProof(
             String id,
+            String provider,
             String subject,
+            String email,
             String tokenHash,
             Instant now,
             Instant expiresAt
@@ -111,14 +119,17 @@ public class SocialLoginRepository {
                     purpose,
                     provider,
                     provider_subject,
+                    subject_email,
                     token_hash,
                     issued_at,
                     expires_at
                 )
-                values (?, 'SIGN_UP', 'KAKAO', ?, ?, ?, ?)
+                values (?, 'SIGN_UP', ?, ?, ?, ?, ?, ?)
                 """,
                 id,
+                provider,
                 subject,
+                email,
                 tokenHash,
                 utc(now),
                 utc(expiresAt)
@@ -126,6 +137,7 @@ public class SocialLoginRepository {
     }
 
     public boolean lockUsableProof(
+            String provider,
             String subject,
             String tokenHash,
             Instant expiresAt,
@@ -135,7 +147,7 @@ public class SocialLoginRepository {
                 """
                 select id
                 from auth_proofs
-                where provider = 'KAKAO'
+                where provider = ?
                   and purpose = 'SIGN_UP'
                   and provider_subject = ?
                   and token_hash = ?
@@ -149,6 +161,7 @@ public class SocialLoginRepository {
                 for update
                 """,
                 (rs, row) -> rs.getString("id"),
+                provider,
                 subject,
                 tokenHash,
                 utc(now),

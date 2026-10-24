@@ -89,6 +89,7 @@ public class SecurityConfig {
                                     "/v1/auth/signup",
                                     "/v1/auth/login",
                                     "/v1/auth/social/*",
+                                    "/v1/auth/social/apple/challenges",
                                     "/v1/auth/password/reset"
                             )
                             .permitAll();

@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,13 +51,32 @@ public class SocialLoginTransaction {
             RequestKey key
     ) {
         lockRequest(key);
-
         return restore(key);
     }
 
     public SocialLoginResponse complete(
             RequestKey key,
             KakaoClient.Verified verified
+    ) {
+        if (!"KAKAO".equals(key.provider())) {
+            throw new IllegalArgumentException(
+                    "Kakao request key required"
+            );
+        }
+
+        return complete(
+                key,
+                verified.subject(),
+                verified.validUntil(),
+                null
+        );
+    }
+
+    public SocialLoginResponse complete(
+            RequestKey key,
+            String subject,
+            Instant validUntil,
+            String email
     ) {
         lockRequest(key);
 
@@ -66,10 +86,11 @@ public class SocialLoginTransaction {
             return restored.get();
         }
 
-        lockSubject(verified.subject());
+        lockSubject(key.provider(), subject);
 
         var owner = repository.findUser(
-                verified.subject()
+                key.provider(),
+                subject
         );
 
         SocialLoginResponse response;
@@ -78,14 +99,13 @@ public class SocialLoginTransaction {
             long userId = owner.get();
 
             var account = repository.lockAccount(userId)
-                    .filter(
-                            SocialLoginRepository.Account::active
-                    )
+                    .filter(SocialLoginRepository.Account::active)
                     .orElseThrow(this::invalid);
 
             if (!repository.lockIdentity(
                     userId,
-                    verified.subject()
+                    key.provider(),
+                    subject
             )) {
                 throw invalid();
             }
@@ -93,8 +113,7 @@ public class SocialLoginTransaction {
             var now = clock.instant()
                     .truncatedTo(ChronoUnit.SECONDS);
 
-            if (!verified.validUntil()
-                    .isAfter(clock.instant())) {
+            if (!validUntil.isAfter(clock.instant())) {
                 throw invalid();
             }
 
@@ -125,18 +144,18 @@ public class SocialLoginTransaction {
             var now = clock.instant()
                     .truncatedTo(ChronoUnit.MICROS);
 
-            if (!verified.validUntil().isAfter(now)) {
+            if (!validUntil.isAfter(now)) {
                 throw invalid();
             }
 
-            String registrationToken =
-                    crypto.generateToken();
-
+            String registrationToken = crypto.generateToken();
             var expiresAt = now.plusSeconds(600);
 
             repository.createProof(
                     UUID.randomUUID().toString(),
-                    verified.subject(),
+                    key.provider(),
+                    subject,
+                    email,
                     crypto.tokenHash(registrationToken),
                     now,
                     expiresAt
@@ -150,12 +169,8 @@ public class SocialLoginTransaction {
 
         requests.complete(
                 key,
-                new Result(
-                        verified.subject(),
-                        response
-                ),
-                clock.instant()
-                        .truncatedTo(ChronoUnit.MICROS)
+                new Result(subject, response),
+                clock.instant().truncatedTo(ChronoUnit.MICROS)
         );
 
         return response;
@@ -176,7 +191,10 @@ public class SocialLoginTransaction {
                 clock.instant()
         );
 
-        lockSubject(result.subject());
+        lockSubject(
+                key.provider(),
+                result.subject()
+        );
 
         var response = result.response();
 
@@ -184,13 +202,12 @@ public class SocialLoginTransaction {
                 == SocialLoginResponse.Status.LOGIN_COMPLETED) {
 
             repository.lockAccount(response.userId())
-                    .filter(
-                            SocialLoginRepository.Account::active
-                    )
+                    .filter(SocialLoginRepository.Account::active)
                     .orElseThrow(this::invalid);
 
             if (!repository.lockIdentity(
                     response.userId(),
+                    key.provider(),
                     result.subject()
             )) {
                 throw invalid();
@@ -201,8 +218,7 @@ public class SocialLoginTransaction {
                         response.accessToken()
                 );
 
-                var authenticated =
-                        authentication.convert(jwt);
+                var authenticated = authentication.convert(jwt);
 
                 if (authenticated == null
                         || !Long.toString(response.userId())
@@ -225,13 +241,14 @@ public class SocialLoginTransaction {
             }
 
         } else {
-            if (repository.findUser(result.subject())
-                    .isPresent()
+            if (repository.findUser(
+                    key.provider(),
+                    result.subject()
+            ).isPresent()
                     || !repository.lockUsableProof(
+                    key.provider(),
                     result.subject(),
-                    crypto.tokenHash(
-                            response.registrationToken()
-                    ),
+                    crypto.tokenHash(response.registrationToken()),
                     response.registrationExpiresAt(),
                     clock.instant()
             )) {
@@ -253,12 +270,15 @@ public class SocialLoginTransaction {
         );
     }
 
-    // AUTH-11에서도 이 잠금 키와 잠금 순서를 공유한다.
-    private void lockSubject(String subject) {
+    // 소셜 회원가입에서도 같은 제공자·subject 잠금을 사용한다.
+    private void lockSubject(
+            String provider,
+            String subject
+    ) {
         guards.lock(
                 hmac.hmac(
                         "social-subject",
-                        "KAKAO",
+                        provider,
                         subject
                 ),
                 clock.instant().plus(Duration.ofDays(2))

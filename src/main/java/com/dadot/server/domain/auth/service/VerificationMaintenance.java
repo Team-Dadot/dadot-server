@@ -50,6 +50,16 @@ public class VerificationMaintenance {
 
         } while (deleted == 1000 && rounds < 20);
 
+        jdbc.update(
+                """
+                delete from apple_login_challenges
+                where expires_at < ?
+                order by expires_at
+                limit 1000
+                """,
+                now
+        );
+
         // 응답 데이터만 제거하고 중복 실행 방지용 키 기록은 유지한다.
         jdbc.update(
                 """
@@ -58,7 +68,8 @@ public class VerificationMaintenance {
                     encrypted_response = null,
                     response_key_version = null
                 where (
-                    operation = 'POST /v1/auth/social/signup'
+                    operation = 'POST /v1/auth/social/apple'
+                    or operation = 'POST /v1/auth/social/signup'
                     or operation = 'POST /v1/auth/social/kakao'
                     or operation = 'POST /v1/auth/signup'
                     or operation = 'POST /v1/auth/email-verifications'

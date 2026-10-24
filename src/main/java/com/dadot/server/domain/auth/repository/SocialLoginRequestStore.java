@@ -1,5 +1,6 @@
 package com.dadot.server.domain.auth.repository;
 
+import com.dadot.server.domain.auth.dto.request.AppleLoginRequest;
 import com.dadot.server.domain.auth.dto.response.SocialLoginResponse;
 import com.dadot.server.domain.auth.support.VerificationCrypto;
 import com.dadot.server.domain.auth.support.VerificationTokenCrypto;
@@ -35,6 +36,7 @@ public class SocialLoginRequestStore {
             String idempotencyKey
     ) {
         return new RequestKey(
+                "KAKAO",
                 hmac.hmac(
                         "idempotency-scope",
                         "AUTH-05",
@@ -49,6 +51,32 @@ public class SocialLoginRequestStore {
                         "AUTH-05-body",
                         "KAKAO",
                         accessToken
+                )
+        );
+    }
+
+    public RequestKey appleKey(
+            AppleLoginRequest body,
+            String idempotencyKey
+    ) {
+        return new RequestKey(
+                "APPLE",
+                hmac.hmac(
+                        "idempotency-scope",
+                        "AUTH-05",
+                        "APPLE",
+                        body.identityToken()
+                ),
+                hmac.hmac(
+                        "idempotency-key",
+                        idempotencyKey.toLowerCase(Locale.ROOT)
+                ),
+                hmac.hmac(
+                        "AUTH-05-body",
+                        "APPLE",
+                        body.identityToken(),
+                        body.authorizationCode(),
+                        body.nonce()
                 )
         );
     }
@@ -78,7 +106,7 @@ public class SocialLoginRequestStore {
                         ).toInstant(ZoneOffset.UTC)
                 ),
                 key.scopeHash(),
-                OPERATION,
+                key.operation(),
                 key.keyHash()
         ).stream().findFirst();
     }
@@ -165,7 +193,7 @@ public class SocialLoginRequestStore {
                 """,
                 result.response().userId(),
                 key.scopeHash(),
-                OPERATION,
+                key.operation(),
                 key.keyHash(),
                 key.bodyHmac(),
                 encrypted,
@@ -178,7 +206,7 @@ public class SocialLoginRequestStore {
     private String context(RequestKey key) {
         return key.scopeHash()
                 + ":"
-                + OPERATION
+                + key.operation()
                 + ":"
                 + key.keyHash();
     }
@@ -191,10 +219,24 @@ public class SocialLoginRequestStore {
     }
 
     public record RequestKey(
+            String provider,
             String scopeHash,
             String keyHash,
             String bodyHmac
     ) {
+        public RequestKey {
+            if (!"KAKAO".equals(provider)
+                    && !"APPLE".equals(provider)) {
+                throw new IllegalArgumentException(
+                        "Unsupported social provider"
+                );
+            }
+        }
+
+        public String operation() {
+            return "POST /v1/auth/social/"
+                    + provider.toLowerCase(Locale.ROOT);
+        }
     }
 
     public record Stored(

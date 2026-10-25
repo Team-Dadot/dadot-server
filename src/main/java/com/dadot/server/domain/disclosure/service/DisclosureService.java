@@ -8,8 +8,11 @@ import com.dadot.server.domain.disclosure.model.DisclosureSync.Accepted;
 import com.dadot.server.domain.disclosure.model.DisclosureSync.Request;
 import com.dadot.server.domain.disclosure.model.DisclosureSync.Result;
 import com.dadot.server.domain.disclosure.model.DisclosureSync.Search;
+import com.dadot.server.domain.disclosure.model.DisclosureSync.SectionResult;
 import com.dadot.server.domain.disclosure.model.DisclosureSync.TaskResult;
 import com.dadot.server.domain.disclosure.repository.DisclosureRepository;
+import com.dadot.server.domain.disclosure.support.OriginalProperties;
+import com.dadot.server.domain.disclosure.support.OriginalStore;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import com.dadot.server.global.security.SessionAuthenticationToken;
@@ -32,6 +35,7 @@ import java.util.function.Supplier;
 
 @Service
 public class DisclosureService {
+
     private final DisclosureRepository repository;
     private final JdbcTemplate jdbc;
     private final LogoutRepository sessions;
@@ -39,6 +43,8 @@ public class DisclosureService {
     private final CompanyLogoUrlResolver logos;
     private final DartClient dart;
     private final Clock clock;
+    private final OriginalProperties originalProperties;
+    private final OriginalStore store;
     private final TransactionTemplate write;
     private final TransactionTemplate read;
 
@@ -50,7 +56,9 @@ public class DisclosureService {
             CompanyLogoUrlResolver logos,
             DartClient dart,
             Clock clock,
-            PlatformTransactionManager manager
+            PlatformTransactionManager manager,
+            OriginalProperties originalProperties,
+            OriginalStore store
     ) {
         this.repository = repository;
         this.jdbc = jdbc;
@@ -59,15 +67,21 @@ public class DisclosureService {
         this.logos = logos;
         this.dart = dart;
         this.clock = clock;
+        this.originalProperties = originalProperties;
+        this.store = store;
 
         write = new TransactionTemplate(manager);
         write.setTimeout(10);
-        write.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        write.setIsolationLevel(
+                TransactionDefinition.ISOLATION_REPEATABLE_READ
+        );
 
         read = new TransactionTemplate(manager);
         read.setReadOnly(true);
         read.setTimeout(10);
-        read.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        read.setIsolationLevel(
+                TransactionDefinition.ISOLATION_REPEATABLE_READ
+        );
     }
 
     public Accepted start(
@@ -76,114 +90,252 @@ public class DisclosureService {
             String key,
             Request request
     ) {
-        if (companyId < 1 || companyId > 9_007_199_254_740_991L || request == null)
+        if (companyId < 1
+                || companyId > 9_007_199_254_740_991L
+                || request == null) {
             throw DisclosureSync.invalid();
+        }
 
         DisclosureSync.uuid(key);
 
-        String operation =
-                "POST /v1/admin/companies/" + companyId + "/disclosure-sync-tasks";
-        String scope = crypto.hmac("disclosure-admin-scope-v1", actor.getName());
-        String keyHash = crypto.hmac("disclosure-key-v1", operation, key);
-        String bodyHash = crypto.hmac(
-                "disclosure-body-v1", operation, repository.json(request)
+        String operation = "POST /v1/admin/companies/"
+                + companyId
+                + "/disclosure-sync-tasks";
+
+        String scope = crypto.hmac(
+                "disclosure-admin-scope-v1",
+                actor.getName()
         );
 
-        return unavailable(() -> Objects.requireNonNull(write.execute(status -> {
-            requireAdmin(actor, true);
+        String keyHash = crypto.hmac(
+                "disclosure-key-v1",
+                operation,
+                key
+        );
 
-            var replay = repository.replay(
-                    scope, operation, keyHash, bodyHash, clock.instant()
-            );
-            if (replay != null) return replay;
+        String bodyHash = crypto.hmac(
+                "disclosure-body-v1",
+                operation,
+                repository.json(request)
+        );
 
-            if (request.toDate().isAfter(
-                    LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")))))
-                throw DisclosureSync.invalid();
+        return unavailable(() ->
+                Objects.requireNonNull(
+                        write.execute(status -> {
+                            requireAdmin(actor, true);
 
-            repository.companyCode(companyId);
+                            var replay = repository.replay(
+                                    scope,
+                                    operation,
+                                    keyHash,
+                                    bodyHash,
+                                    clock.instant()
+                            );
 
-            if (!dart.ready())
-                throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE);
+                            if (replay != null) {
+                                return replay;
+                            }
 
-            var result = repository.create(
-                    actor.getPrincipal().userId(), companyId,
-                    scope, operation, keyHash, bodyHash, request, clock.instant()
-            );
+                            if (request.toDate().isAfter(
+                                    LocalDate.now(
+                                            clock.withZone(
+                                                    ZoneId.of(
+                                                            "Asia/Seoul"
+                                                    )
+                                            )
+                                    )
+                            )) {
+                                throw DisclosureSync.invalid();
+                            }
 
-            requireAdmin(actor, true);
-            return result;
-        })));
+                            repository.companyCode(companyId);
+
+                            if (!dart.ready()
+                                    || (originalProperties.enabled()
+                                    && !store.ready())) {
+                                throw new BusinessException(
+                                        ErrorCode.SERVICE_UNAVAILABLE
+                                );
+                            }
+
+                            var result = repository.create(
+                                    actor.getPrincipal().userId(),
+                                    companyId,
+                                    scope,
+                                    operation,
+                                    keyHash,
+                                    bodyHash,
+                                    request,
+                                    clock.instant()
+                            );
+
+                            requireAdmin(actor, true);
+
+                            return result;
+                        })
+                )
+        );
     }
 
-    public Result search(SessionAuthenticationToken actor, Search request) {
-        return unavailable(() -> Objects.requireNonNull(read.execute(status -> {
-            requireAdmin(actor, false);
+    public Result search(
+            SessionAuthenticationToken actor,
+            Search request
+    ) {
+        return unavailable(() ->
+                Objects.requireNonNull(
+                        read.execute(status -> {
+                            requireAdmin(actor, false);
 
-            TaskResult task = request.syncTaskId() == null
-                    ? null
-                    : repository.task(request.syncTaskId(), request.companyId());
+                            TaskResult task =
+                                    request.syncTaskId() == null
+                                            ? null
+                                            : repository.task(
+                                            request.syncTaskId(),
+                                            request.companyId()
+                                    );
 
-            long total = repository.countVersions(request);
+                            long total =
+                                    repository.countVersions(request);
 
-            return new Result(
-                    repository.versions(request, logos::resolve),
-                    request.page(), request.size(), total,
-                    (total + request.size() - 1) / request.size(),
-                    ((long) request.page() + 1) * request.size() < total,
-                    task
-            );
-        })));
+                            return new Result(
+                                    repository.versions(
+                                            request,
+                                            logos::resolve
+                                    ),
+                                    request.page(),
+                                    request.size(),
+                                    total,
+                                    (total + request.size() - 1)
+                                            / request.size(),
+                                    ((long) request.page() + 1)
+                                            * request.size() < total,
+                                    task
+                            );
+                        })
+                )
+        );
     }
 
-    private void requireAdmin(SessionAuthenticationToken actor, boolean lock) {
+    public SectionResult sections(
+            SessionAuthenticationToken actor,
+            long disclosureId,
+            long versionId,
+            int page,
+            int size
+    ) {
+        if (disclosureId < 1
+                || versionId < 1
+                || disclosureId > 9_007_199_254_740_991L
+                || versionId > 9_007_199_254_740_991L
+                || page < 0
+                || size < 1
+                || size > 100) {
+            throw DisclosureSync.invalid();
+        }
+
+        return unavailable(() ->
+                Objects.requireNonNull(
+                        read.execute(status -> {
+                            requireAdmin(actor, false);
+
+                            return repository.sections(
+                                    disclosureId,
+                                    versionId,
+                                    page,
+                                    size
+                            );
+                        })
+                )
+        );
+    }
+
+    private void requireAdmin(
+            SessionAuthenticationToken actor,
+            boolean lock
+    ) {
         var accounts = jdbc.query(
-                "select role, status, auth_version from users where id = ?"
+                "select role, status, auth_version "
+                        + "from users where id = ?"
                         + (lock ? " for update" : ""),
                 (rs, n) -> new Object[]{
-                        rs.getString(1), rs.getString(2), rs.getInt(3)
+                        rs.getString(1),
+                        rs.getString(2),
+                        rs.getInt(3)
                 },
                 actor.getPrincipal().userId()
         );
 
         if (accounts.isEmpty()
                 || !"ACTIVE".equals(accounts.getFirst()[1])
-                || (int) accounts.getFirst()[2] != actor.getAuthVersion())
-            throw new BusinessException(ErrorCode.UNAUTHENTICATED);
+                || (int) accounts.getFirst()[2]
+                != actor.getAuthVersion()) {
+            throw new BusinessException(
+                    ErrorCode.UNAUTHENTICATED
+            );
+        }
 
-        if (!"ADMIN".equals(accounts.getFirst()[0]))
-            throw new BusinessException(ErrorCode.FORBIDDEN);
+        if (!"ADMIN".equals(accounts.getFirst()[0])) {
+            throw new BusinessException(
+                    ErrorCode.FORBIDDEN
+            );
+        }
 
         if (lock) {
             var session = sessions.lockSession(
-                    actor.getPrincipal().userId(), actor.getSessionId()
-            ).orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));
+                    actor.getPrincipal().userId(),
+                    actor.getSessionId()
+            ).orElseThrow(() -> new BusinessException(
+                    ErrorCode.UNAUTHENTICATED
+            ));
 
-            if (!session.usable(clock.instant()))
-                throw new BusinessException(ErrorCode.UNAUTHENTICATED);
+            if (!session.usable(clock.instant())) {
+                throw new BusinessException(
+                        ErrorCode.UNAUTHENTICATED
+                );
+            }
+
         } else {
-            var now = DisclosureRepository.utc(clock.instant());
+            var now = DisclosureRepository.utc(
+                    clock.instant()
+            );
 
-            if (Objects.requireNonNull(jdbc.queryForObject("""
-                    select count(*) from auth_sessions
-                    where id = ? and user_id = ?
-                      and revoked_at is null and created_at <= ? and expires_at > ?
-                    """, Long.class, actor.getSessionId(),
-                    actor.getPrincipal().userId(), now, now)) != 1)
-                throw new BusinessException(ErrorCode.UNAUTHENTICATED);
+            if (Objects.requireNonNull(
+                    jdbc.queryForObject("""
+                            select count(*)
+                            from auth_sessions
+                            where id = ?
+                              and user_id = ?
+                              and revoked_at is null
+                              and created_at <= ?
+                              and expires_at > ?
+                            """,
+                            Long.class,
+                            actor.getSessionId(),
+                            actor.getPrincipal().userId(),
+                            now,
+                            now
+                    )
+            ) != 1) {
+                throw new BusinessException(
+                        ErrorCode.UNAUTHENTICATED
+                );
+            }
         }
     }
 
     private <T> T unavailable(Supplier<T> action) {
         try {
             return action.get();
+
         } catch (
                 TransientDataAccessException
                 | DataAccessResourceFailureException
                 | CannotCreateTransactionException
                 | TransactionTimedOutException ex
         ) {
-            throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE);
+            throw new BusinessException(
+                    ErrorCode.SERVICE_UNAVAILABLE
+            );
         }
     }
 }

@@ -5,17 +5,18 @@ import com.dadot.server.domain.disclosure.model.DisclosureSync.Accepted;
 import com.dadot.server.domain.disclosure.model.DisclosureSync.Request;
 import com.dadot.server.domain.disclosure.model.DisclosureSync.Result;
 import com.dadot.server.domain.disclosure.model.DisclosureSync.Search;
+import com.dadot.server.domain.disclosure.model.DisclosureSync.SectionResult;
 import com.dadot.server.domain.disclosure.service.DisclosureService;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import com.dadot.server.global.response.ApiResponse;
 import com.dadot.server.global.security.SessionAuthenticationToken;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.enums.ParameterIn;
-import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Parameters;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
@@ -36,14 +37,20 @@ import java.util.Set;
 @RestController
 @RequiredArgsConstructor
 public class DisclosureController {
+
     private final DisclosureService service;
 
     @Operation(
             operationId = "ADM-01",
-            summary = "공시 목록 수집 접수",
-            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            summary = "공시 수집 접수",
+            requestBody =
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
                     required = true,
-                    content = @Content(schema = @Schema(implementation = Request.class))
+                    content = @Content(
+                            schema = @Schema(
+                                    implementation = Request.class
+                            )
+                    )
             )
     )
     @PostMapping(
@@ -55,55 +62,185 @@ public class DisclosureController {
             @PathVariable long companyId,
             @RequestHeader("Idempotency-Key") String key,
             @RequestBody JsonNode body,
-            @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query
+            @Parameter(hidden = true)
+            @RequestParam MultiValueMap<String, String> query
     ) {
-        if (!query.isEmpty()) throw DisclosureSync.invalid();
+        if (!query.isEmpty()) {
+            throw DisclosureSync.invalid();
+        }
 
         return ResponseEntity.accepted()
                 .cacheControl(CacheControl.noStore())
                 .body(ApiResponse.success(
                         service.start(
-                                actor(authentication), companyId, key, Request.parse(body)
+                                actor(authentication),
+                                companyId,
+                                key,
+                                Request.parse(body)
                         )
                 ));
     }
 
-    @Operation(operationId = "ADM-03", summary = "공시 자료 목록 및 수집 작업 상태 조회")
+    @Operation(
+            operationId = "ADM-03",
+            summary = "공시 자료 목록 및 수집 작업 상태 조회"
+    )
     @Parameters({
-            @Parameter(name = "page", in = ParameterIn.QUERY, description = "페이지 번호, 기본 0"),
-            @Parameter(name = "size", in = ParameterIn.QUERY, description = "페이지 크기, 기본 20 / 최대 100"),
-            @Parameter(name = "companyId", in = ParameterIn.QUERY, description = "기업 ID"),
-            @Parameter(name = "status", in = ParameterIn.QUERY, description = "공시 내용 버전의 검수 상태"),
-            @Parameter(name = "syncTaskId", in = ParameterIn.QUERY, description = "수집 작업 UUID")
+            @Parameter(
+                    name = "page",
+                    in = ParameterIn.QUERY,
+                    description = "페이지 번호, 기본 0"
+            ),
+            @Parameter(
+                    name = "size",
+                    in = ParameterIn.QUERY,
+                    description = "페이지 크기, 기본 20 / 최대 100"
+            ),
+            @Parameter(
+                    name = "companyId",
+                    in = ParameterIn.QUERY,
+                    description = "기업 ID"
+            ),
+            @Parameter(
+                    name = "status",
+                    in = ParameterIn.QUERY,
+                    description = "공시 내용 버전의 검수 상태"
+            ),
+            @Parameter(
+                    name = "syncTaskId",
+                    in = ParameterIn.QUERY,
+                    description = "수집 작업 UUID"
+            )
     })
     @GetMapping("/v1/admin/disclosures")
     public ResponseEntity<ApiResponse<Result>> search(
             Authentication authentication,
-            @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query,
+            @Parameter(hidden = true)
+            @RequestParam MultiValueMap<String, String> query,
             @RequestBody(required = false) byte[] body
     ) {
-        if (body != null && body.length != 0) throw DisclosureSync.invalid();
-
-        Set<String> allowed = Set.of("page", "size", "companyId", "status", "syncTaskId");
-        if (query.entrySet().stream().anyMatch(
-                e -> !allowed.contains(e.getKey()) || e.getValue().size() != 1))
+        if (body != null && body.length != 0) {
             throw DisclosureSync.invalid();
+        }
+
+        Set<String> allowed = Set.of(
+                "page",
+                "size",
+                "companyId",
+                "status",
+                "syncTaskId"
+        );
+
+        if (query.entrySet().stream().anyMatch(
+                e -> !allowed.contains(e.getKey())
+                        || e.getValue().size() != 1
+        )) {
+            throw DisclosureSync.invalid();
+        }
 
         try {
             var request = new Search(
-                    Integer.parseInt(query.getFirst("page") == null
-                            ? "0" : digits(query.getFirst("page"))),
-                    Integer.parseInt(query.getFirst("size") == null
-                            ? "20" : digits(query.getFirst("size"))),
+                    Integer.parseInt(
+                            query.getFirst("page") == null
+                                    ? "0"
+                                    : digits(
+                                    query.getFirst("page")
+                            )
+                    ),
+                    Integer.parseInt(
+                            query.getFirst("size") == null
+                                    ? "20"
+                                    : digits(
+                                    query.getFirst("size")
+                            )
+                    ),
                     query.getFirst("companyId") == null
-                            ? null : Long.valueOf(digits(query.getFirst("companyId"))),
+                            ? null
+                            : Long.valueOf(
+                            digits(
+                                    query.getFirst("companyId")
+                            )
+                    ),
                     query.getFirst("status"),
                     query.getFirst("syncTaskId")
             );
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.noStore())
-                    .body(ApiResponse.success(service.search(actor(authentication), request)));
+                    .body(ApiResponse.success(
+                            service.search(
+                                    actor(authentication),
+                                    request
+                            )
+                    ));
+
+        } catch (NumberFormatException ex) {
+            throw DisclosureSync.invalid();
+        }
+    }
+
+    @Operation(
+            operationId = "adminDisclosureVersionSections",
+            summary = "공시 버전 본문 절 조회"
+    )
+    @Parameters({
+            @Parameter(
+                    name = "page",
+                    in = ParameterIn.QUERY,
+                    description = "페이지 번호, 기본 0"
+            ),
+            @Parameter(
+                    name = "size",
+                    in = ParameterIn.QUERY,
+                    description = "페이지 크기, 기본 50 / 최대 100"
+            )
+    })
+    @GetMapping(
+            "/v1/admin/disclosures/{disclosureId}/versions/{disclosureVersionId}/sections"
+    )
+    public ResponseEntity<ApiResponse<SectionResult>> sections(
+            Authentication authentication,
+            @PathVariable long disclosureId,
+            @PathVariable long disclosureVersionId,
+            @Parameter(hidden = true)
+            @RequestParam MultiValueMap<String, String> query,
+            @RequestBody(required = false) byte[] body
+    ) {
+        if ((body != null && body.length != 0)
+                || query.entrySet().stream().anyMatch(
+                e -> !Set.of(
+                        "page",
+                        "size"
+                ).contains(e.getKey())
+                        || e.getValue().size() != 1
+        )) {
+            throw DisclosureSync.invalid();
+        }
+
+        try {
+            int page = Integer.parseInt(
+                    query.getFirst("page") == null
+                            ? "0"
+                            : digits(query.getFirst("page"))
+            );
+
+            int size = Integer.parseInt(
+                    query.getFirst("size") == null
+                            ? "50"
+                            : digits(query.getFirst("size"))
+            );
+
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.noStore())
+                    .body(ApiResponse.success(
+                            service.sections(
+                                    actor(authentication),
+                                    disclosureId,
+                                    disclosureVersionId,
+                                    page,
+                                    size
+                            )
+                    ));
 
         } catch (NumberFormatException ex) {
             throw DisclosureSync.invalid();
@@ -111,14 +248,23 @@ public class DisclosureController {
     }
 
     private String digits(String value) {
-        if (!value.matches("[0-9]{1,16}")) throw DisclosureSync.invalid();
+        if (!value.matches("[0-9]{1,16}")) {
+            throw DisclosureSync.invalid();
+        }
+
         return value;
     }
 
-    private SessionAuthenticationToken actor(Authentication authentication) {
+    private SessionAuthenticationToken actor(
+            Authentication authentication
+    ) {
         if (authentication instanceof SessionAuthenticationToken session
-                && session.isAuthenticated()) return session;
+                && session.isAuthenticated()) {
+            return session;
+        }
 
-        throw new BusinessException(ErrorCode.UNAUTHENTICATED);
+        throw new BusinessException(
+                ErrorCode.UNAUTHENTICATED
+        );
     }
 }

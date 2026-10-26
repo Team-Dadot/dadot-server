@@ -249,7 +249,7 @@ public class DisclosureService {
         );
     }
 
-    private void requireAdmin(
+    void requireAdmin(
             SessionAuthenticationToken actor,
             boolean lock
     ) {

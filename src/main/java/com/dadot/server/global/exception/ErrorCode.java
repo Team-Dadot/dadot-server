@@ -3,13 +3,17 @@ package com.dadot.server.global.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+    INVALID_STATUS_TRANSITION(
+            HttpStatus.CONFLICT,
+            "허용되지 않은 상태 변경입니다."
+    ),
     ONBOARDING_INCOMPLETE(
             HttpStatus.CONFLICT,
             "기업과 직무 등 필수 단계를 확인해 주세요."
     ),
     VERSION_CONFLICT(
             HttpStatus.CONFLICT,
-            "온보딩 정보가 변경되었습니다. 다시 조회해 주세요."
+            "정보가 변경되었습니다. 다시 조회해 주세요."
     ),
     IDEMPOTENCY_KEY_EXPIRED(
             HttpStatus.CONFLICT,

@@ -3,6 +3,11 @@ package com.dadot.server.global.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+
+    CONTENT_UNAVAILABLE(
+            HttpStatus.CONFLICT,
+            "근거 자료가 변경되었거나 현재 제공할 수 없습니다."
+    ),
     INVALID_STATUS_TRANSITION(
             HttpStatus.CONFLICT,
             "허용되지 않은 상태 변경입니다."
@@ -19,22 +24,18 @@ public enum ErrorCode {
             HttpStatus.CONFLICT,
             "요청 키가 만료되었습니다. 새 요청 키를 사용해 주세요."
     ),
-
     PASSWORD_AUTH_UNAVAILABLE(
             HttpStatus.CONFLICT,
             "이메일 로그인 계정에서만 변경할 수 있습니다."
     ),
-
     INVALID_REGISTRATION_TOKEN(
             HttpStatus.UNAUTHORIZED,
             "소셜 인증을 다시 진행해 주세요."
     ),
-
     SOCIAL_ACCOUNT_ALREADY_REGISTERED(
             HttpStatus.CONFLICT,
             "이미 가입된 계정입니다. 소셜 로그인을 다시 진행해 주세요."
     ),
-
     INVALID_SOCIAL_CREDENTIAL(
             HttpStatus.UNAUTHORIZED,
             "소셜 로그인을 다시 진행해 주세요."
@@ -43,7 +44,6 @@ public enum ErrorCode {
             HttpStatus.UNAUTHORIZED,
             "이메일 또는 비밀번호를 확인해 주세요."
     ),
-
     INVALID_VERIFICATION_TOKEN(
             HttpStatus.UNAUTHORIZED,
             "이메일 인증을 다시 진행해 주세요."
@@ -60,7 +60,6 @@ public enum ErrorCode {
             HttpStatus.SERVICE_UNAVAILABLE,
             "가입 약관을 준비 중입니다. 잠시 후 다시 시도해 주세요."
     ),
-
     INVALID_VERIFICATION_CODE(
             HttpStatus.BAD_REQUEST,
             "인증번호가 올바르지 않습니다."
@@ -73,7 +72,6 @@ public enum ErrorCode {
             HttpStatus.TOO_MANY_REQUESTS,
             "인증 시도 횟수를 초과했습니다."
     ),
-
     IMAGE_TOO_LARGE(
             HttpStatus.CONTENT_TOO_LARGE,
             "프로필 이미지는 5MiB 이하여야 합니다."
@@ -138,7 +136,10 @@ public enum ErrorCode {
     private final HttpStatus status;
     private final String message;
 
-    ErrorCode(HttpStatus status, String message) {
+    ErrorCode(
+            HttpStatus status,
+            String message
+    ) {
         this.status = status;
         this.message = message;
     }

@@ -28,6 +28,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+
     // Database
     implementation 'org.flywaydb:flyway-mysql'
     runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
@@ -50,6 +51,7 @@ dependencies {
     testCompileOnly 'org.projectlombok:lombok'
     testAnnotationProcessor 'org.projectlombok:lombok'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
     implementation 'org.springframework.boot:spring-boot-starter-mail'
 }
 
@@ -59,6 +61,10 @@ jacoco {
 
 tasks.named('test') {
     useJUnitPlatform()
+
+    // 여러 테스트 컨텍스트의 연결 풀이 동시에 누적되지 않도록 제한한다.
+    systemProperty 'spring.test.context.cache.maxSize', '8'
+
     finalizedBy tasks.named('jacocoTestReport')
 }
 

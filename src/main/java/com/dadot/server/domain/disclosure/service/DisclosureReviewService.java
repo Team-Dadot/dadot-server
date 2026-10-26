@@ -7,8 +7,10 @@ import com.dadot.server.domain.disclosure.model.DisclosureReview.Request;
 import com.dadot.server.domain.disclosure.model.DisclosureReview.Result;
 import com.dadot.server.domain.disclosure.model.DisclosureReview.Status;
 import com.dadot.server.domain.disclosure.repository.DisclosureReviewRepository;
+import com.dadot.server.domain.quiz.repository.QuizDisclosureImpactRepository;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
+import com.dadot.server.global.security.AdminAccess;
 import com.dadot.server.global.security.SessionAuthenticationToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +24,7 @@ import org.springframework.transaction.TransactionTimedOutException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
+import java.util.LinkedHashSet;
 import java.util.Objects;
 
 @Service
@@ -31,20 +34,23 @@ public class DisclosureReviewService {
             LoggerFactory.getLogger(DisclosureReviewService.class);
 
     private final DisclosureReviewRepository repository;
-    private final DisclosureService access;
+    private final AdminAccess access;
+    private final QuizDisclosureImpactRepository quizImpact;
     private final CompanyLogoUrlResolver logos;
     private final Clock clock;
     private final TransactionTemplate write;
 
     public DisclosureReviewService(
             DisclosureReviewRepository repository,
-            DisclosureService access,
+            AdminAccess access,
+            QuizDisclosureImpactRepository quizImpact,
             CompanyLogoUrlResolver logos,
             Clock clock,
             PlatformTransactionManager manager
     ) {
         this.repository = repository;
         this.access = access;
+        this.quizImpact = quizImpact;
         this.logos = logos;
         this.clock = clock;
 
@@ -94,7 +100,7 @@ public class DisclosureReviewService {
             long disclosureId,
             Request request
     ) {
-        access.requireAdmin(actor, true);
+        access.require(actor, true);
 
         long companyId = repository.companyId(disclosureId);
 
@@ -178,7 +184,6 @@ public class DisclosureReviewService {
         }
 
         var now = clock.instant();
-
         long actorId = actor.getPrincipal().userId();
 
         if (correctionChanged) {
@@ -245,13 +250,30 @@ public class DisclosureReviewService {
                 key -> logo(companyId, key)
         );
 
-        // V11 현재 퀴즈/면접 테이블이 없으므로 영향 문항은 0개다.
-        // 해당 도메인 도입 시 이 트랜잭션에 영향 집계·차단을 연결해야 한다.
-        access.requireAdmin(actor, true);
+        var changedDisclosures = new LinkedHashSet<Long>();
+        changedDisclosures.add(disclosureId);
+
+        if (correction != null
+                && (
+                correctionChanged
+                        || request.status() == Status.PUBLISHED
+        )) {
+            changedDisclosures.add(correction);
+        }
+
+        long affectedQuizzes = quizImpact.suspendUnavailable(
+                changedDisclosures,
+                actorId,
+                request.reason(),
+                now
+        );
+
+        // 면접 테이블·API는 아직 없으며 도입 시 해당 영향 처리도 연결한다.
+        access.require(actor, true);
 
         return new Result(
                 result,
-                0,
+                affectedQuizzes,
                 0
         );
     }

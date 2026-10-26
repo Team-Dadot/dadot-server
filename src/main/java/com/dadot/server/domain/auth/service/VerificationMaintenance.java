@@ -69,6 +69,7 @@ public class VerificationMaintenance {
                     response_key_version = null
                 where (
                     operation = 'POST /v1/users/me/onboarding/complete'
+                    or operation = 'POST /v1/admin/quiz-questions'
                     or operation = 'POST /v1/auth/social/apple'
                     or operation = 'POST /v1/auth/social/signup'
                     or operation = 'POST /v1/auth/social/kakao'

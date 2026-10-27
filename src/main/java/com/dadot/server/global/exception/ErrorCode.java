@@ -4,6 +4,12 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    QUIZ_BANK_INSUFFICIENT(HttpStatus.CONFLICT, "오늘 퀴즈를 준비 중입니다. 잠시 후 다시 시도해 주세요."),
+    QUIZ_SET_NOT_COMPLETED(HttpStatus.CONFLICT, "모든 문항을 제출한 뒤 결과를 확인해 주세요."),
+    QUIZ_SET_EXPIRED(HttpStatus.CONFLICT, "오늘의 새 퀴즈를 시작해 주세요."),
+    ANSWER_ALREADY_SUBMITTED(HttpStatus.CONFLICT, "이미 제출한 답변입니다."),
+    INVALID_ITEM_ORDER(HttpStatus.CONFLICT, "현재 문항부터 제출해 주세요."),
+
     CONTENT_UNAVAILABLE(
             HttpStatus.CONFLICT,
             "근거 자료가 변경되었거나 현재 제공할 수 없습니다."

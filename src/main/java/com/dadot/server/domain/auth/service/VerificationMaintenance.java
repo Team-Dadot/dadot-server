@@ -70,6 +70,8 @@ public class VerificationMaintenance {
                 where (
                     operation = 'POST /v1/users/me/onboarding/complete'
                     or operation = 'POST /v1/admin/quiz-questions'
+                    or operation like 'POST /v1/companies/%/quiz-sets/today'
+                    or operation like 'POST /v1/quiz-sets/%/answers'
                     or operation = 'POST /v1/auth/social/apple'
                     or operation = 'POST /v1/auth/social/signup'
                     or operation = 'POST /v1/auth/social/kakao'

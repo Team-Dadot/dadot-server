@@ -4,6 +4,10 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    COMPANY_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "준비 기업은 최대 5개입니다."),
+    COMPANY_ALREADY_ACTIVE(HttpStatus.CONFLICT, "이미 준비 중인 기업입니다."),
+    MIN_COMPANY_REQUIRED(HttpStatus.CONFLICT, "준비 기업은 최소 1개가 필요합니다."),
+
     QUIZ_BANK_INSUFFICIENT(HttpStatus.CONFLICT, "오늘 퀴즈를 준비 중입니다. 잠시 후 다시 시도해 주세요."),
     QUIZ_SET_NOT_COMPLETED(HttpStatus.CONFLICT, "모든 문항을 제출한 뒤 결과를 확인해 주세요."),
     QUIZ_SET_EXPIRED(HttpStatus.CONFLICT, "오늘의 새 퀴즈를 시작해 주세요."),
@@ -142,10 +146,7 @@ public enum ErrorCode {
     private final HttpStatus status;
     private final String message;
 
-    ErrorCode(
-            HttpStatus status,
-            String message
-    ) {
+    ErrorCode(HttpStatus status, String message) {
         this.status = status;
         this.message = message;
     }

@@ -113,6 +113,7 @@ public class QuizReviewService {
             return Objects.requireNonNull(read.execute(tx -> action.apply(access.require(actor, false))));
         } catch (TransientDataAccessException | DataAccessResourceFailureException
                  | CannotCreateTransactionException | TransactionTimedOutException ex) {
+            log.warn("Quiz review query failed due to a data access or transaction error", ex);
             throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE);
         }
     }

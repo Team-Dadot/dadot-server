@@ -4,6 +4,8 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    ONBOARDING_REQUIRED(HttpStatus.CONFLICT, "온보딩을 먼저 완료해 주세요."),
+
     COMPANY_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "준비 기업은 최대 5개입니다."),
     COMPANY_ALREADY_ACTIVE(HttpStatus.CONFLICT, "이미 준비 중인 기업입니다."),
     MIN_COMPANY_REQUIRED(HttpStatus.CONFLICT, "준비 기업은 최소 1개가 필요합니다."),
@@ -64,7 +66,7 @@ public enum ErrorCode {
     ),
     TERMS_CHANGED(
             HttpStatus.CONFLICT,
-            "이용약관이 변경되었습니다. 최신 내용을 확인해 주세요."
+            "가입 약관이 변경되었습니다. 최신 내용을 확인해 주세요."
     ),
     SIGNUP_TERMS_UNAVAILABLE(
             HttpStatus.SERVICE_UNAVAILABLE,

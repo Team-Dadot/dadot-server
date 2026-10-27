@@ -21,6 +21,9 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionTimedOutException;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.sql.SQLException;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.LongFunction;
@@ -52,7 +55,7 @@ public class QuizReviewService {
         if (paging == null) {
             throw QuizBank.invalid();
         }
-        return query(actor, user -> {
+        return query("companies", actor, user -> {
             var page = repository.companies(user, paging);
             var content = page.rows().stream().map(company -> new CompanyItem(
                     new QuizPlay.Company(company.id(), company.name(), company.industry(), logo(company)),
@@ -69,7 +72,7 @@ public class QuizReviewService {
         if (search == null) {
             throw QuizBank.invalid();
         }
-        return query(actor, user -> {
+        return query("questions", actor, user -> {
             repository.requireCompany(user, search.companyId());
             var counts = repository.counts(user, search.companyId());
             long total = search.filter() == Filter.INCORRECT ? counts.incorrect() : counts.all();
@@ -82,7 +85,7 @@ public class QuizReviewService {
 
     public QuizPlay.ResultItem detail(SessionAuthenticationToken actor, long questionId) {
         QuizBank.id(questionId);
-        return query(actor, user -> {
+        return query("detail", actor, user -> {
             var submitted = repository.latest(user, questionId);
             var item = snapshots.items(submitted.setId()).stream()
                     .filter(row -> row.id() == submitted.itemId()
@@ -108,11 +111,36 @@ public class QuizReviewService {
         }
     }
 
-    private <T> T query(SessionAuthenticationToken actor, LongFunction<T> action) {
+    private <T> T query(String operation, SessionAuthenticationToken actor, LongFunction<T> action) {
         try {
             return Objects.requireNonNull(read.execute(tx -> action.apply(access.require(actor, false))));
         } catch (TransientDataAccessException | DataAccessResourceFailureException
                  | CannotCreateTransactionException | TransactionTimedOutException ex) {
+            Throwable root = ex;
+            SQLException sql = null;
+            var visited = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
+
+            for (Throwable cause = ex;
+                 cause != null && visited.add(cause);
+                 cause = cause.getCause()) {
+                root = cause;
+                if (sql == null && cause instanceof SQLException sqlException) {
+                    sql = sqlException;
+                }
+            }
+
+            String sqlState = sql == null ? null : sql.getSQLState();
+            if (sqlState != null && !sqlState.matches("[0-9A-Z]{5}")) {
+                sqlState = null;
+            }
+            Integer errorCode = sql == null ? null : sql.getErrorCode();
+
+            log.warn(
+                    "Quiz review query unavailable: operation={}, exceptionClass={}, "
+                            + "rootCauseClass={}, sqlState={}, dbErrorCode={}",
+                    operation, ex.getClass().getName(), root.getClass().getName(),
+                    sqlState, errorCode);
+
             throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE);
         }
     }

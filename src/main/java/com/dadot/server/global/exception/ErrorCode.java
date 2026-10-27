@@ -4,6 +4,8 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    EXPERIENCE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "경험은 최대 100개까지 등록할 수 있습니다."),
+
     ONBOARDING_REQUIRED(HttpStatus.CONFLICT, "온보딩을 먼저 완료해 주세요."),
 
     COMPANY_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "준비 기업은 최대 5개입니다."),

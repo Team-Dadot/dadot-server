@@ -24,6 +24,7 @@ import java.util.UUID;
 public class InterviewSubmissionRepository {
     private final JdbcTemplate jdbc;
     private final InterviewPolicyRepository policies;
+    private final InterviewEvaluationInputRepository evaluations;
 
     public Question question(long user, long id) {
         return jdbc.query("""
@@ -149,6 +150,12 @@ public class InterviewSubmissionRepository {
                     source_attempt_id, request_key_hash, request_body_hmac, available_at, created_at)
                 values (?, ?, ?, 'INTERVIEW_EVALUATION', ?, ?, ?, ?, ?, ?, ?)
                 """, task, user, company, context, policy, attempt, key.hash(), key.body(), utc(now), utc(now));
+        try {
+            evaluations.prepare(task, now);
+        } catch (com.dadot.server.domain.interview.model.InterviewGeneration.Failure ex) {
+            throw new BusinessException("INTERVIEW_INPUT_TOO_LARGE".equals(ex.code())
+                    ? ErrorCode.INTERVIEW_INPUT_TOO_LARGE : ErrorCode.CONTEXT_UNAVAILABLE);
+        }
         return task;
     }
 

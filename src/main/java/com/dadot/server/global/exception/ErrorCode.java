@@ -4,13 +4,16 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    EVALUATION_ALREADY_SUCCEEDED(HttpStatus.CONFLICT, "이미 평가가 완료되었습니다."),
+    CONTEXT_UNAVAILABLE(HttpStatus.CONFLICT, "평가에 필요한 자료를 사용할 수 없어 재처리할 수 없습니다."),
+
     QUESTION_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "이 질문의 제출 기회를 모두 사용했습니다."),
     COMPANY_INACTIVE(HttpStatus.CONFLICT, "기업을 다시 추가한 뒤 작성해 주세요."),
     TASK_PROCESSING(HttpStatus.CONFLICT, "이 질문의 답변을 평가 중입니다. 잠시 후 다시 시도해 주세요."),
 
     EXISTING_QUESTION_AVAILABLE(HttpStatus.CONFLICT, "이어 쓸 질문이 있습니다."),
     DAILY_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "오늘 이 기업의 면접 질문 또는 답변 한도에 도달했습니다."),
-    INTERVIEW_INPUT_TOO_LARGE(HttpStatus.CONFLICT, "면접 생성 자료가 입력 한도를 초과했습니다."),
+    INTERVIEW_INPUT_TOO_LARGE(HttpStatus.CONFLICT, "면접 처리 자료가 입력 한도를 초과했습니다."),
 
     POLICY_ALREADY_EXISTS(HttpStatus.CONFLICT, "같은 유형과 범위의 정책이 있습니다. sourcePolicyId로 새 버전을 등록해 주세요."),
     POLICY_NOT_CONFIGURED(HttpStatus.CONFLICT, "면접 생성·평가 기준을 확인해 주세요."),

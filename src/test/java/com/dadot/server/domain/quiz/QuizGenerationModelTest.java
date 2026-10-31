@@ -6,6 +6,7 @@ import com.dadot.server.domain.quiz.support.QuizGenerationProperties;
 import com.dadot.server.domain.quiz.support.QuizSourcePlanner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -89,6 +90,40 @@ class QuizGenerationModelTest {
                 new Input(List.of(section(1, 1, "연구개발에 투자합니다.")), List.of()), 1).rejectedCount());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "3.5%,35%",
+            "1.2배,12배",
+            "'1,200원',12.00원",
+            "３．５％,３５％"
+    })
+    void keepsDistinctNumericOptions(String first, String second) {
+        var result = validateOptions(first, second);
+        assertEquals(1, result.questions().size());
+        assertEquals(0, result.rejectedCount());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "3.5%,３．５％",
+            "'3 . 5 %',3.5%",
+            "'1,200원','１，２００원'",
+            "'미래 기술 확보','미래·기술 확보'",
+            "ABC,ａｂｃ"
+    })
+    void stillRejectsEquivalentOptionFormatting(String first, String second) {
+        var result = validateOptions(first, second);
+        assertTrue(result.questions().isEmpty());
+        assertEquals(1, result.rejectedCount());
+    }
+
+    @Test
+    void optionFixDoesNotChangeExistingQuestionFingerprints() {
+        assertEquals("기업매출35", QuizGeneration.normalize("기 업, 매출 3.5%!"));
+        assertEquals(QuizGeneration.sha256("기업매출35"),
+                QuizGeneration.fingerprint("기 업, 매출 3.5%!"));
+    }
+
     @Test
     void requiresPrimaryEvidenceInsteadOfOnlyRepeatedContext() {
         var input = new Input(List.of(section(1, 1, "핵심 본문")), List.of(section(2, 1, "연구개발에 투자합니다.")));
@@ -112,6 +147,18 @@ class QuizGenerationModelTest {
     void propertyRepresentationNeverIncludesApiKey() {
         var properties = new QuizGenerationProperties(true, false, "gpt-6-luna", "secret-".repeat(10), 4096, 3000000, 500);
         assertFalse(properties.toString().contains("secret-"));
+    }
+
+    private Validated validateOptions(String first, String second) {
+        var value = (tools.jackson.databind.node.ObjectNode) mapper.valueToTree(
+                question(1, 1, "연구개발에 투자합니다."));
+        value.set("options", mapper.valueToTree(List.of(
+                Map.of("position", 1, "text", first),
+                Map.of("position", 2, "text", second),
+                Map.of("position", 3, "text", "나머지 보기 A"),
+                Map.of("position", 4, "text", "나머지 보기 B"))));
+        return QuizGeneration.validate(mapper.createArrayNode().add(value), 5,
+                new Input(List.of(section(1, 1, "연구개발에 투자합니다.")), List.of()), 1);
     }
 
     private static Section section(long id, long report, String text) {

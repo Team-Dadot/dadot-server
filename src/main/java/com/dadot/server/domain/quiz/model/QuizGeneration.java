@@ -21,6 +21,9 @@ import java.util.regex.Pattern;
 public final class QuizGeneration {
     public static final String PROMPT_VERSION = "quiz-bank-v1";
     private static final Pattern NORMALIZE = Pattern.compile("[\\p{Z}\\s\\p{P}]+");
+    private static final Pattern OPTION_WHITESPACE = Pattern.compile("[\\p{Z}\\s]+");
+    private static final Pattern OPTION_PUNCTUATION = Pattern.compile(
+            "[\\p{P}&&[^.,]]|(?<!\\p{Nd})[.,]|[.,](?!\\p{Nd})");
 
     private QuizGeneration() {}
 
@@ -103,7 +106,7 @@ public final class QuizGeneration {
                 var options = new HashSet<String>();
                 for (var option : content.options()) {
                     validText(option.text(), 30);
-                    if (!options.add(normalize(option.text()))) throw QuizBank.invalid();
+                    if (!options.add(normalizeOption(option.text()))) throw QuizBank.invalid();
                 }
                 boolean primaryEvidence = false;
                 for (var evidence : content.evidence()) {
@@ -162,6 +165,13 @@ public final class QuizGeneration {
     public static String normalize(String value) {
         return NORMALIZE.matcher(Normalizer.normalize(value, Normalizer.Form.NFKC)
                 .toLowerCase(Locale.ROOT)).replaceAll("");
+    }
+
+    private static String normalizeOption(String value) {
+        String compact = OPTION_WHITESPACE.matcher(Normalizer.normalize(value, Normalizer.Form.NFKC)
+                .toLowerCase(Locale.ROOT)).replaceAll("");
+        // 보기의 숫자 사이 .와 ,만 보존한다. 기존 문항 fingerprint 정규화는 유지한다.
+        return OPTION_PUNCTUATION.matcher(compact).replaceAll("");
     }
 
     public static String fingerprint(String question) {

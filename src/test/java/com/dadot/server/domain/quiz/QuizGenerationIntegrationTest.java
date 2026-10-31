@@ -8,6 +8,8 @@ import com.dadot.server.domain.quiz.service.QuizGenerationWorker;
 import com.dadot.server.global.security.AccessTokenIssuer;
 import com.dadot.server.infrastructure.openai.OpenAiQuizClient;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -263,6 +265,68 @@ class QuizGenerationIntegrationTest {
         allowClaim(); worker.runOnce();
         assertEquals("FAILED", repository.result(next).status());
         assertEquals(1, count("select count(*) from ai_task_runs where task_id=?", next));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "AI_REFUSED,false,1,1",
+            "AI_INVALID_OUTPUT,false,1,2",
+            "AI_INCOMPLETE_OUTPUT,false,1,2",
+            "AI_HTTP_400,false,1,1",
+            "AI_QUOTA_EXCEEDED,false,1,1",
+            "AI_CONNECTION_ERROR,true,3,1",
+            "AI_HTTP_503,true,3,2"
+    })
+    void terminalBatchFailureKeepsCandidatesButNeverSavesPartialDrafts(
+            String code, boolean retryable, int attempts, int failedBatch) throws Exception {
+        long version = versions.getFirst();
+        jdbc.batchUpdate("insert into disclosure_sections(disclosure_version_id, company_id, section_key, content_text) values (?, ?, ?, ?)",
+                java.util.stream.IntStream.range(0, 81).boxed().toList(), 100, (s, i) -> {
+                    s.setLong(1, version);
+                    s.setLong(2, company);
+                    s.setString(3, "failure-block-" + i);
+                    s.setString(4, ORIGINAL);
+                });
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            if (lease.batchNo() == failedBatch) throw new Failure(code, retryable, 0, metadata());
+            return output(lease);
+        }).when(client).generate(any());
+        String task = start(100);
+        assertEquals(3, repository.result(task).totalBatches());
+        for (int i = 0; i < failedBatch; i++) {
+            allowClaim();
+            worker.runOnce();
+        }
+        var before = repository.result(task);
+        assertEquals(failedBatch, before.processedBatches());
+        assertTrue(before.candidateCount() > 0);
+        assertEquals(0, before.createdCount());
+        for (int i = 0; i < attempts; i++) {
+            jdbc.update("update ai_tasks set available_at='1970-01-01' where id=?", task);
+            allowClaim();
+            worker.runOnce();
+        }
+        allowClaim();
+        worker.runOnce();
+        var result = json(mvc.perform(get("/v1/admin/quiz-generation-tasks/" + task)
+                .header("Authorization", "Bearer " + token)).andExpect(status().isOk()))
+                .path("data");
+        assertEquals("FAILED", result.path("status").asText());
+        assertEquals(code, result.path("errorCode").asText());
+        assertEquals(failedBatch, result.path("processedBatches").asInt());
+        assertEquals(before.candidateCount(), result.path("candidateCount").asInt());
+        assertEquals(0, result.path("createdCount").asInt());
+        assertTrue(result.path("questionIds").isEmpty());
+        assertFalse(result.path("targetReached").asBoolean());
+        assertTrue(result.path("shortfallReason").isNull());
+        assertEquals(0, count("select count(*) from quiz_questions where company_id=?", company));
+        assertEquals(0, count("select count(*) from quiz_question_versions where company_id=?", company));
+        assertEquals(0, count("select count(*) from admin_audit_events where actor_user_id=? and action='QUIZ_AI_DRAFT_CREATED'", user));
+        assertEquals(before.candidateCount(), count("select count(*) from quiz_generation_candidates where task_id=?", task));
+        assertEquals(0, count("select count(*) from quiz_generation_jobs where task_id=? and active_company_id is not null", task));
+        assertEquals(attempts, count("select count(*) from ai_task_runs where task_id=? and status='FAILED'", task));
+        verify(client, times(failedBatch + attempts)).generate(any());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.dadot.server.domain.experience.repository;
 
+import com.dadot.server.domain.interview.repository.InterviewMaterialImpactRepository;
 import com.dadot.server.domain.experience.model.Experience;
 import com.dadot.server.domain.experience.model.Experience.*;
 import com.dadot.server.global.exception.BusinessException;
@@ -23,6 +24,7 @@ import java.util.Objects;
 public class ExperienceRepository {
 
     private final JdbcTemplate jdbc;
+    private final InterviewMaterialImpactRepository interviewImpacts;
 
     public long count(long user) {
         return Objects.requireNonNull(jdbc.queryForObject("""
@@ -74,33 +76,42 @@ public class ExperienceRepository {
     // 모든 쓰기는 users → auth_sessions 잠금 안에서 실행한다.
     public long create(long user, Create request, Instant now) {
         var holder = new GeneratedKeyHolder();
+
         changed(jdbc.update(connection -> {
             var statement = connection.prepareStatement("""
                     insert into personal_materials(user_id,type,created_at,updated_at)
                     values (?,'EXPERIENCE',?,?)
                     """, Statement.RETURN_GENERATED_KEYS);
+
             statement.setLong(1, user);
             statement.setObject(2, utc(now));
             statement.setObject(3, utc(now));
             return statement;
         }, holder));
+
         long id = Objects.requireNonNull(holder.getKey()).longValue();
         if (id > 9_007_199_254_740_991L) unavailable();
+
         append(user, id, 1, request.title(), request.content(), now);
+
         changed(jdbc.update("""
                 update personal_materials set current_version_no = 1
                 where user_id = ? and type = 'EXPERIENCE' and id = ?
                   and current_version_no is null
                 """, user, id));
+
         return id;
     }
 
     public void update(long user, Detail previous, Patch request, Instant now) {
         if (previous.version() >= Integer.MAX_VALUE) unavailable();
+
         long next = previous.version() + 1;
+
         append(user, previous.experienceId(), next,
                 request.title() == null ? previous.title() : request.title(),
                 request.content() == null ? previous.content() : request.content(), now);
+
         changed(jdbc.update("""
                 update personal_materials set current_version_no = ?, updated_at = ?
                 where user_id = ? and type = 'EXPERIENCE' and id = ?
@@ -118,14 +129,18 @@ public class ExperienceRepository {
     }
 
     public void delete(long user, long id) {
+        interviewImpacts.invalidate(user, id);
+
         changed(jdbc.update("""
                 update personal_materials set current_version_no = null
                 where user_id = ? and type = 'EXPERIENCE' and id = ?
                 """, user, id));
+
         jdbc.update("""
                 delete from material_versions
                 where user_id = ? and material_type = 'EXPERIENCE' and material_id = ?
                 """, user, id);
+
         changed(jdbc.update("""
                 delete from personal_materials
                 where user_id = ? and type = 'EXPERIENCE' and id = ?

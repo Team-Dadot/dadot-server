@@ -4,6 +4,10 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    QUESTION_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "이 질문의 제출 기회를 모두 사용했습니다."),
+    COMPANY_INACTIVE(HttpStatus.CONFLICT, "기업을 다시 추가한 뒤 작성해 주세요."),
+    TASK_PROCESSING(HttpStatus.CONFLICT, "이 질문의 답변을 평가 중입니다. 잠시 후 다시 시도해 주세요."),
+
     EXISTING_QUESTION_AVAILABLE(HttpStatus.CONFLICT, "이어 쓸 질문이 있습니다."),
     DAILY_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "오늘 이 기업의 면접 질문 또는 답변 한도에 도달했습니다."),
     INTERVIEW_INPUT_TOO_LARGE(HttpStatus.CONFLICT, "면접 생성 자료가 입력 한도를 초과했습니다."),

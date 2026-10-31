@@ -4,6 +4,9 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    POLICY_ALREADY_EXISTS(HttpStatus.CONFLICT, "같은 유형과 범위의 정책이 있습니다. sourcePolicyId로 새 버전을 등록해 주세요."),
+    POLICY_NOT_CONFIGURED(HttpStatus.CONFLICT, "평가 기준과 산식 검증을 완료해 주세요."),
+
     EXPERIENCE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "경험은 최대 100개까지 등록할 수 있습니다."),
 
     ONBOARDING_REQUIRED(HttpStatus.CONFLICT, "온보딩을 먼저 완료해 주세요."),

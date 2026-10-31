@@ -62,6 +62,10 @@ jacoco {
 tasks.named('test') {
     useJUnitPlatform()
 
+    // 셸의 운영 설정을 상속해도 테스트가 실제 AI 평가 워커를 실행하지 않게 한다.
+    environment 'APP_INTERVIEW_EVALUATION_ENABLED', 'false'
+    environment 'APP_INTERVIEW_EVALUATION_WORKER_ENABLED', 'false'
+
     // 여러 테스트 컨텍스트의 연결 풀이 동시에 누적되지 않도록 제한한다.
     systemProperty 'spring.test.context.cache.maxSize', '8'
 

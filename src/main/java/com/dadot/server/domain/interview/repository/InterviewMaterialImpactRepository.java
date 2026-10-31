@@ -71,6 +71,13 @@ public class InterviewMaterialImpactRepository {
                 """, user);
 
         jdbc.update("""
+                delete l from evaluation_material_links l
+                join ai_contexts x on x.id = l.context_id
+                join material_versions v on v.id = l.material_version_id
+                where x.user_id = ? and v.material_id = ? and v.material_type = 'EXPERIENCE'
+                """, user, materialId);
+
+        jdbc.update("""
                 delete m
                 from ai_context_materials m
                 join material_versions v on v.id = m.material_version_id

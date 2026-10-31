@@ -4,8 +4,12 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    EXISTING_QUESTION_AVAILABLE(HttpStatus.CONFLICT, "이어 쓸 질문이 있습니다."),
+    DAILY_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "오늘 이 기업의 면접 질문 또는 답변 한도에 도달했습니다."),
+    INTERVIEW_INPUT_TOO_LARGE(HttpStatus.CONFLICT, "면접 생성 자료가 입력 한도를 초과했습니다."),
+
     POLICY_ALREADY_EXISTS(HttpStatus.CONFLICT, "같은 유형과 범위의 정책이 있습니다. sourcePolicyId로 새 버전을 등록해 주세요."),
-    POLICY_NOT_CONFIGURED(HttpStatus.CONFLICT, "평가 기준과 산식 검증을 완료해 주세요."),
+    POLICY_NOT_CONFIGURED(HttpStatus.CONFLICT, "면접 생성·평가 기준을 확인해 주세요."),
 
     EXPERIENCE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "경험은 최대 100개까지 등록할 수 있습니다."),
 

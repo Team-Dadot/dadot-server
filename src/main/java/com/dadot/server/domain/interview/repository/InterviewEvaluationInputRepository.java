@@ -149,12 +149,13 @@ public class InterviewEvaluationInputRepository {
         if (tasks.isEmpty()) return;
         String task = tasks.getFirst();
         try { prepare(task, now); }
-        catch (Failure ex) {
+        catch (Failure | BusinessException ex) {
+            String code = ex instanceof Failure f ? f.code() : "CONTEXT_UNAVAILABLE";
             jdbc.update("""
                     update ai_tasks set status = ?, last_error_code = ?, completed_at = ?, lease_owner = null, lease_until = null
                     where id = ? and status = 'PROCESSING'
                         and not exists(select 1 from interview_evaluation_jobs j where j.task_id = ai_tasks.id)
-                    """, "CONTEXT_UNAVAILABLE".equals(ex.code()) ? "CANCELLED" : "FAILED", ex.code(),
+                    """, "CONTEXT_UNAVAILABLE".equals(code) ? "CANCELLED" : "FAILED", code,
                     LocalDateTime.ofInstant(now, ZoneOffset.UTC), task);
         }
     }

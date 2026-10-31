@@ -13,6 +13,8 @@ import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import com.dadot.server.global.security.SessionAuthenticationToken;
 import com.dadot.server.global.security.UserAccess;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Service;
@@ -21,13 +23,18 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.function.Supplier;
 
 @Service
 public class InterviewSubmissionService {
+    private static final Logger log = LoggerFactory.getLogger(InterviewSubmissionService.class);
+
     private final InterviewSubmissionRepository repository;
     private final InterviewSubmissionRequestStore requests;
     private final InterviewReadRepository reads;
@@ -50,7 +57,7 @@ public class InterviewSubmissionService {
 
     public Saved save(SessionAuthenticationToken actor, long questionId, SaveDraft input) {
         InterviewPolicy.id(questionId);
-        return storage(() -> Objects.requireNonNull(write.execute(tx -> {
+        return storage("save", () -> Objects.requireNonNull(write.execute(tx -> {
             long user = access.require(actor, true);
             Question question = repository.question(user, questionId);
             var prep = reads.preparation(user, question.companyId(), true);
@@ -69,7 +76,7 @@ public class InterviewSubmissionService {
 
     public Accepted submit(SessionAuthenticationToken actor, long questionId, String key, Submit input) {
         InterviewPolicy.id(questionId);
-        return storage(() -> Objects.requireNonNull(write.execute(tx -> {
+        return storage("submit", () -> Objects.requireNonNull(write.execute(tx -> {
             long user = access.require(actor, true);
             Question question = repository.question(user, questionId);
             var prep = reads.preparation(user, question.companyId(), true);
@@ -109,7 +116,7 @@ public class InterviewSubmissionService {
 
     public Attempt detail(SessionAuthenticationToken actor, long attemptId) {
         InterviewPolicy.id(attemptId);
-        return storage(() -> Objects.requireNonNull(read.execute(tx ->
+        return storage("detail", () -> Objects.requireNonNull(read.execute(tx ->
                 repository.attempt(access.require(actor, false), attemptId))));
     }
 
@@ -139,10 +146,37 @@ public class InterviewSubmissionService {
         return tx;
     }
 
-    private static <T> T storage(Supplier<T> action) {
+    // SQL·답변 원문이 포함될 수 있는 cause는 전파하지 않고 허용된 진단 메타데이터만 기록한다.
+    @SuppressWarnings("PMD.PreserveStackTrace")
+    private static <T> T storage(String operation, Supplier<T> action) {
         try {
             return action.get();
         } catch (TransientDataAccessException | DataAccessResourceFailureException | TransactionException ex) {
+            Throwable root = ex;
+            SQLException sql = null;
+            var visited = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
+
+            for (Throwable cause = ex;
+                 cause != null && visited.add(cause);
+                 cause = cause.getCause()) {
+                root = cause;
+                if (sql == null && cause instanceof SQLException sqlException) {
+                    sql = sqlException;
+                }
+            }
+
+            String sqlState = sql == null ? null : sql.getSQLState();
+            if (sqlState != null && !sqlState.matches("[0-9A-Z]{5}")) {
+                sqlState = null;
+            }
+            Integer dbErrorCode = sql == null ? null : sql.getErrorCode();
+
+            log.warn(
+                    "Interview submission storage unavailable: operation={}, exceptionClass={}, "
+                            + "rootCauseClass={}, sqlState={}, dbErrorCode={}",
+                    operation, ex.getClass().getName(), root.getClass().getName(),
+                    sqlState, dbErrorCode);
+
             throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE);
         }
     }

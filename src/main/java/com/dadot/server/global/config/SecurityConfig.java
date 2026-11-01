@@ -112,8 +112,31 @@ public class SecurityConfig {
                             .hasRole("ADMIN");
 
                     authorize
-                            .requestMatchers("/v1/**")
+                            .requestMatchers(
+                                    HttpMethod.DELETE,
+                                    "/v1/users/me"
+                            )
                             .authenticated();
+
+                    authorize
+                            .requestMatchers("/v1/**")
+                            .access((authentication, context) -> {
+                                var actor = authentication.get();
+
+                                return new org.springframework.security.authorization.AuthorizationDecision(
+                                        actor != null
+                                                && actor.isAuthenticated()
+                                                && !(actor instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)
+                                                && actor.getAuthorities()
+                                                .stream()
+                                                .noneMatch(authority ->
+                                                        "ROLE_ACCOUNT_DELETION"
+                                                                .equals(
+                                                                        authority.getAuthority()
+                                                                )
+                                                )
+                                );
+                            });
 
                     authorize
                             .anyRequest()

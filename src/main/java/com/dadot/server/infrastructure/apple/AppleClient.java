@@ -207,6 +207,23 @@ public class AppleClient {
             String rawNonce,
             Verified original
     ) {
+        return exchangeTokens(code, rawNonce, original, false).identity();
+    }
+
+    public PreparedDeletion prepareDeletion(
+            String code,
+            String rawNonce,
+            Verified original
+    ) {
+        return exchangeTokens(code, rawNonce, original, true);
+    }
+
+    private PreparedDeletion exchangeTokens(
+            String code,
+            String rawNonce,
+            Verified original,
+            boolean requireRefreshToken
+    ) {
         checkConfigured();
 
         var form = new LinkedMultiValueMap<String, String>();
@@ -216,7 +233,7 @@ public class AppleClient {
         form.add("grant_type", "authorization_code");
 
         try {
-            Verified exchanged = client.post()
+            PreparedDeletion exchanged = client.post()
                     .uri(TOKEN_URL)
                     .contentType(
                             MediaType.APPLICATION_FORM_URLENCODED
@@ -253,31 +270,102 @@ public class AppleClient {
                             throw unavailable();
                         }
 
-                        return verifyIdentity(
-                                idToken.asString(),
-                                rawNonce
+                        JsonNode refreshNode = body.get("refresh_token");
+
+                        String refresh =
+                                refreshNode != null && refreshNode.isString()
+                                        ? refreshNode.asString()
+                                        : null;
+
+                        if (requireRefreshToken
+                                && (
+                                refresh == null
+                                        || !refresh.matches("[!-~]{1,8192}")
+                        )) {
+                            throw unavailable();
+                        }
+
+                        return new PreparedDeletion(
+                                verifyIdentity(
+                                        idToken.asString(),
+                                        rawNonce
+                                ),
+                                refresh
                         );
                     });
 
             if (exchanged == null
-                    || !matches(original.subject(), exchanged.subject())
+                    || !matches(
+                    original.subject(),
+                    exchanged.identity().subject()
+            )
                     || !original.validUntil().isAfter(clock.instant())) {
                 throw invalid();
             }
 
             Instant validUntil =
-                    original.validUntil().isBefore(exchanged.validUntil())
+                    original.validUntil().isBefore(
+                            exchanged.identity().validUntil()
+                    )
                             ? original.validUntil()
-                            : exchanged.validUntil();
+                            : exchanged.identity().validUntil();
 
-            return new Verified(
-                    exchanged.subject(),
-                    validUntil,
-                    exchanged.email()
+            return new PreparedDeletion(
+                    new Verified(
+                            exchanged.identity().subject(),
+                            validUntil,
+                            exchanged.identity().email()
+                    ),
+                    exchanged.refreshToken()
             );
 
         } catch (RestClientException | JacksonException ex) {
             throw unavailable();
+        }
+    }
+
+    public void revoke(String refreshToken) {
+        checkConfigured();
+
+        if (refreshToken == null
+                || !refreshToken.matches("[!-~]{1,8192}")) {
+            throw unavailable();
+        }
+
+        var form = new LinkedMultiValueMap<String, String>();
+        form.add("client_id", clientId);
+        form.add("client_secret", clientSecret());
+        form.add("token", refreshToken);
+        form.add("token_type_hint", "refresh_token");
+
+        try {
+            client.post()
+                    .uri(ISSUER + "/auth/revoke")
+                    .contentType(
+                            MediaType.APPLICATION_FORM_URLENCODED
+                    )
+                    .body(form)
+                    .exchange((request, response) -> {
+                        read(response.getBody());
+
+                        if (response.getStatusCode().value() != 200) {
+                            throw unavailable();
+                        }
+
+                        return true;
+                    });
+        } catch (RestClientException ex) {
+            throw unavailable();
+        }
+    }
+
+    public record PreparedDeletion(
+            Verified identity,
+            String refreshToken
+    ) {
+        @Override
+        public String toString() {
+            return "PreparedDeletion[REDACTED]";
         }
     }
 

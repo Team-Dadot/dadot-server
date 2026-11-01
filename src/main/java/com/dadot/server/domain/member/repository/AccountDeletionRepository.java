@@ -30,10 +30,18 @@ public class AccountDeletionRepository {
     private final AuthRequestGuardRepository guards;
     private final JsonMapper mapper;
     private final Clock clock;
+    private final LegacySocialResponseCleaner legacyResponses;
 
-    public record Fingerprint(String actor, String key, String body) {}
+    public record Fingerprint(
+            String actor,
+            String key,
+            String body
+    ) {}
 
-    public record Credentials(String subject, String revocationToken) {
+    public record Credentials(
+            String subject,
+            String revocationToken
+    ) {
         @Override
         public String toString() {
             return "Credentials[REDACTED]";
@@ -66,7 +74,11 @@ public class AccountDeletionRepository {
         }
     }
 
-    public String actorHash(long user, String session, int version) {
+    public String actorHash(
+            long user,
+            String session,
+            int version
+    ) {
         return hmac.hmac(
                 "member-deletion-actor",
                 Long.toString(user),
@@ -116,10 +128,12 @@ public class AccountDeletionRepository {
                         rs.getString(4),
                         "SUCCEEDED".equals(rs.getString(5)),
                         rs.getObject(
-                                6, LocalDateTime.class
+                                6,
+                                LocalDateTime.class
                         ).toInstant(ZoneOffset.UTC),
                         rs.getObject(
-                                7, LocalDateTime.class
+                                7,
+                                LocalDateTime.class
                         ).toInstant(ZoneOffset.UTC)
                 ),
                 actorHash
@@ -132,17 +146,22 @@ public class AccountDeletionRepository {
             int version,
             Instant now
     ) {
-        return Boolean.TRUE.equals(jdbc.queryForObject(
-                """
-                select exists(select 1 from account_deletions
-                    where actor_hash = ?
-                        and created_at <= ? and expires_at > ?)
-                """,
-                Boolean.class,
-                actorHash(user, session, version),
-                utc(now),
-                utc(now)
-        ));
+        return Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                        """
+                        select exists(
+                            select 1 from account_deletions
+                            where actor_hash = ?
+                                and created_at <= ?
+                                and expires_at > ?
+                        )
+                        """,
+                        Boolean.class,
+                        actorHash(user, session, version),
+                        utc(now),
+                        utc(now)
+                )
+        );
     }
 
     // 인증 처리와 같은 잠금 순서:
@@ -303,7 +322,8 @@ public class AccountDeletionRepository {
         jdbc.update(
                 """
                 update interview_generation_jobs
-                set active_user_id = null, active_company_id = null
+                set active_user_id = null,
+                    active_company_id = null
                 where user_id = ?
                 """,
                 user
@@ -324,7 +344,8 @@ public class AccountDeletionRepository {
         return jdbc.query(
                 """
                 select id from account_deletions
-                where status = 'PROCESSING' and available_at <= ?
+                where status = 'PROCESSING'
+                    and available_at <= ?
                     and (lease_until is null or lease_until <= ?)
                 order by available_at, id limit 10
                 """,
@@ -354,7 +375,9 @@ public class AccountDeletionRepository {
 
         if (rows.size() != 1
                 || !"DELETING".equals(rows.getFirst())) {
-            throw new IllegalStateException("Expected deleting member");
+            throw new IllegalStateException(
+                    "Expected deleting member"
+            );
         }
     }
 
@@ -366,7 +389,8 @@ public class AccountDeletionRepository {
         int changed = jdbc.update(
                 """
                 update account_deletions
-                set lease_owner = ?, lease_until = ?,
+                set lease_owner = ?,
+                    lease_until = ?,
                     lease_version = lease_version + 1
                 where id = ? and status = 'PROCESSING'
                     and available_at <= ?
@@ -416,32 +440,44 @@ public class AccountDeletionRepository {
         );
     }
 
-    public boolean owned(Lease lease, Instant now) {
-        return Boolean.TRUE.equals(jdbc.queryForObject(
-                """
-                select exists(select 1 from account_deletions
-                    where id = ? and user_id = ?
-                        and status = 'PROCESSING'
-                        and lease_owner = ? and lease_version = ?
-                        and lease_until > ?)
-                """,
-                Boolean.class,
-                lease.id(),
-                lease.user(),
-                lease.owner(),
-                lease.version(),
-                utc(now)
-        ));
+    public boolean owned(
+            Lease lease,
+            Instant now
+    ) {
+        return Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                        """
+                        select exists(
+                            select 1 from account_deletions
+                            where id = ? and user_id = ?
+                                and status = 'PROCESSING'
+                                and lease_owner = ?
+                                and lease_version = ?
+                                and lease_until > ?
+                        )
+                        """,
+                        Boolean.class,
+                        lease.id(),
+                        lease.user(),
+                        lease.owner(),
+                        lease.version(),
+                        utc(now)
+                )
+        );
     }
 
-    public void revoked(Lease lease, Instant now) {
+    public void revoked(
+            Lease lease,
+            Instant now
+    ) {
         jdbc.update(
                 """
                 update account_deletions
                 set provider_revoked = true
                 where id = ? and user_id = ?
                     and status = 'PROCESSING'
-                    and lease_owner = ? and lease_version = ?
+                    and lease_owner = ?
+                    and lease_version = ?
                     and lease_until > ?
                 """,
                 lease.id(),
@@ -452,7 +488,11 @@ public class AccountDeletionRepository {
         );
     }
 
-    public void retry(Lease lease, Instant now, String code) {
+    public void retry(
+            Lease lease,
+            Instant now,
+            String code
+    ) {
         jdbc.update(
                 """
                 update account_deletions
@@ -466,7 +506,8 @@ public class AccountDeletionRepository {
                     lease_owner = null,
                     lease_until = null
                 where id = ? and status = 'PROCESSING'
-                    and lease_owner = ? and lease_version = ?
+                    and lease_owner = ?
+                    and lease_version = ?
                     and lease_until > ?
                 """,
                 code,
@@ -557,7 +598,8 @@ public class AccountDeletionRepository {
 
         jdbc.update(
                 """
-                update personal_materials set current_version_no = null
+                update personal_materials
+                set current_version_no = null
                 where user_id = ?
                 """,
                 user
@@ -580,7 +622,10 @@ public class AccountDeletionRepository {
                 delete p from auth_proofs p
                 where p.user_id = ? or (
                     p.provider = ? and (
-                        (p.provider = 'EMAIL' and p.subject_email = ?)
+                        (
+                            p.provider = 'EMAIL'
+                            and p.subject_email = ?
+                        )
                         or (
                             p.provider <> 'EMAIL'
                             and p.provider_subject = ?
@@ -645,7 +690,8 @@ public class AccountDeletionRepository {
                 where id = ? and user_id = ?
                     and status = 'PROCESSING'
                     and provider_revoked = true
-                    and lease_owner = ? and lease_version = ?
+                    and lease_owner = ?
+                    and lease_version = ?
                     and lease_until > ?
                 """,
                 utc(finishingAt),
@@ -661,14 +707,20 @@ public class AccountDeletionRepository {
         }
 
         if (jdbc.update(
-                "delete from users where id = ? and status = 'DELETING'",
+                """
+                delete from users
+                where id = ? and status = 'DELETING'
+                """,
                 user
         ) != 1) {
             throw new IllegalStateException("Member deletion failed");
         }
     }
 
-    private void scrubAuthentication(long user, Identity identity) {
+    private void scrubAuthentication(
+            long user,
+            Identity identity
+    ) {
         String subjectHash = hmac.hmac(
                 "auth-subject",
                 identity.provider().name(),
@@ -715,81 +767,11 @@ public class AccountDeletionRepository {
                     identity.subject()
             );
         } else {
-            // V18 이전 가입 전 소셜 응답에는 subject_hash가 없다.
-            // 이행 기간에만 100행씩 읽어 소유자를 검증한다.
-            long cursor = 0;
-
-            while (true) {
-                var legacy = jdbc.query(
-                        """
-                        select id, scope_hash, operation, key_hash,
-                            encrypted_response, response_key_version
-                        from api_idempotency_requests
-                        where id > ? and subject_hash is null
-                            and user_id is null
-                            and encrypted_response is not null
-                            and operation in (
-                                'POST /v1/auth/social/kakao',
-                                'POST /v1/auth/social/apple'
-                            )
-                        order by id limit 100
-                        """,
-                        (rs, row) -> new Legacy(
-                                rs.getLong(1),
-                                rs.getString(2)
-                                        + ":"
-                                        + rs.getString(3)
-                                        + ":"
-                                        + rs.getString(4),
-                                rs.getString(3),
-                                rs.getString(5),
-                                rs.getString(6)
-                        ),
-                        cursor
-                );
-
-                if (legacy.isEmpty()) {
-                    break;
-                }
-
-                for (Legacy item : legacy) {
-                    cursor = item.id();
-
-                    String suffix =
-                            identity.provider() == Provider.APPLE
-                                    ? "/apple"
-                                    : "/kakao";
-
-                    if (!item.operation().endsWith(suffix)) {
-                        continue;
-                    }
-
-                    var body = mapper.readTree(
-                            crypto.decrypt(
-                                    item.encrypted(),
-                                    item.version(),
-                                    item.context()
-                            )
-                    );
-
-                    if (identity.subject().equals(
-                            body.path("subject").asString()
-                    )) {
-                        jdbc.update(
-                                """
-                                update api_idempotency_requests
-                                set response_payload = null,
-                                    encrypted_response = null,
-                                    response_key_version = null,
-                                    subject_hash = ?
-                                where id = ?
-                                """,
-                                subjectHash,
-                                item.id()
-                        );
-                    }
-                }
-            }
+            legacyResponses.clean(
+                    identity.provider(),
+                    identity.subject(),
+                    subjectHash
+            );
         }
     }
 
@@ -804,7 +786,10 @@ public class AccountDeletionRepository {
         );
     }
 
-    private void delete(String table, long user) {
+    private void delete(
+            String table,
+            long user
+    ) {
         jdbc.update(
                 "delete from " + table + " where user_id = ?",
                 user
@@ -818,12 +803,4 @@ public class AccountDeletionRepository {
     private static String value(String value) {
         return value == null ? "" : value;
     }
-
-    private record Legacy(
-            long id,
-            String context,
-            String operation,
-            String encrypted,
-            String version
-    ) {}
 }

@@ -16,6 +16,8 @@ import com.dadot.server.infrastructure.apple.AppleClient;
 import com.dadot.server.infrastructure.kakao.KakaoAccountClient;
 import com.dadot.server.infrastructure.kakao.KakaoClient;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
@@ -33,6 +35,7 @@ public class AccountDeletionService {
     private final MemberRepository members;
     private final UserAccess access;
     private final VerificationIpLimiter limiter;
+    private final AccountReauthenticationLimiter attempts;
     private final PasswordEncoder passwords;
     private final VerificationTokenCrypto crypto;
     private final AppleClient apple;
@@ -49,6 +52,7 @@ public class AccountDeletionService {
             MemberRepository members,
             UserAccess access,
             VerificationIpLimiter limiter,
+            AccountReauthenticationLimiter attempts,
             PasswordEncoder passwords,
             VerificationTokenCrypto crypto,
             AppleClient apple,
@@ -63,6 +67,7 @@ public class AccountDeletionService {
         this.members = members;
         this.access = access;
         this.limiter = limiter;
+        this.attempts = attempts;
         this.passwords = passwords;
         this.crypto = crypto;
         this.apple = apple;
@@ -105,62 +110,12 @@ public class AccountDeletionService {
             ).orElse(null);
 
             if (existing == null) {
-                limiter.consume(remoteAddress);
-
-                Identity identity = Objects.requireNonNull(
-                        read.execute(tx -> {
-                            long user = access.require(actor, false);
-                            return members.identity(user, false);
-                        })
+                existing = begin(
+                        actor,
+                        body,
+                        key,
+                        remoteAddress
                 );
-
-                if (identity.provider() != body.provider()) {
-                    throw Member.reauthenticationFailed();
-                }
-
-                Reauthenticated proof = verify(body, identity, key);
-
-                existing = Objects.requireNonNull(write.execute(tx -> {
-                    long user = actor.getPrincipal().userId();
-
-                    repository.lockSources(
-                            user,
-                            identity,
-                            clock.instant()
-                    );
-
-                    var raced = repository.find(key.actor());
-
-                    if (raced.isPresent()) {
-                        return raced.get();
-                    }
-
-                    access.require(actor, true);
-
-                    Identity current = members.identity(user, true);
-
-                    if (!current.equals(identity)
-                            || !proof.validUntil().isAfter(
-                            clock.instant()
-                    )) {
-                        throw Member.reauthenticationFailed();
-                    }
-
-                    String id = UUID.randomUUID().toString();
-
-                    repository.start(
-                            id,
-                            user,
-                            key,
-                            current,
-                            proof.revocationToken(),
-                            clock.instant()
-                    );
-
-                    return repository.find(
-                            key.actor()
-                    ).orElseThrow();
-                }));
             }
 
             requireSame(existing, key);
@@ -181,6 +136,137 @@ public class AccountDeletionService {
 
             return Boolean.TRUE;
         });
+    }
+
+    private Stored begin(
+            SessionAuthenticationToken actor,
+            Delete body,
+            Fingerprint key,
+            String remoteAddress
+    ) {
+        limiter.consume(remoteAddress);
+
+        Identity identity = Objects.requireNonNull(
+                read.execute(tx -> {
+                    long user = access.require(actor, false);
+                    return members.identity(user, false);
+                })
+        );
+
+        if (identity.provider() != body.provider()) {
+            throw Member.reauthenticationFailed();
+        }
+
+        if (body.provider() == Provider.EMAIL) {
+            attempts.consume(actor.getPrincipal().userId());
+        }
+
+        Reauthenticated proof;
+
+        try {
+            proof = verify(body, identity, key);
+        } catch (BusinessException ex) {
+            // 첫 요청이 nonce를 소유한 동안 접수가 완료됐을 수 있다.
+            // 이 호출은 nonce 실패 표시를 남기거나 코드를 다시
+            // 교환하지 않는다.
+            if (body.provider() == Provider.APPLE) {
+                var accepted = repository.find(key.actor());
+
+                if (accepted.isPresent()) {
+                    return accepted.get();
+                }
+            }
+
+            throw ex;
+        }
+
+        try {
+            return Objects.requireNonNull(
+                    write.execute(tx -> {
+                        long user = actor.getPrincipal().userId();
+
+                        repository.lockSources(
+                                user,
+                                identity,
+                                clock.instant()
+                        );
+
+                        var raced = repository.find(key.actor());
+
+                        if (raced.isPresent()) {
+                            return raced.get();
+                        }
+
+                        access.require(actor, true);
+
+                        Identity current = members.identity(user, true);
+
+                        if (!current.equals(identity)
+                                || !proof.validUntil().isAfter(
+                                clock.instant()
+                        )) {
+                            throw Member.reauthenticationFailed();
+                        }
+
+                        repository.start(
+                                UUID.randomUUID().toString(),
+                                user,
+                                key,
+                                current,
+                                proof.revocationToken(),
+                                clock.instant()
+                        );
+
+                        if (!proof.validUntil().isAfter(clock.instant())) {
+                            throw Member.reauthenticationFailed();
+                        }
+
+                        return repository.find(
+                                key.actor()
+                        ).orElseThrow();
+                    })
+            );
+        } catch (RuntimeException ex) {
+            if (body.provider() == Provider.APPLE) {
+                markAppleFailure(body, key);
+            }
+
+            throw ex;
+        }
+    }
+
+    private String appleRequestHash(Fingerprint key) {
+        return crypto.tokenHash(
+                "member-delete:"
+                        + key.actor()
+                        + ":"
+                        + key.key()
+                        + ":"
+                        + key.body()
+        );
+    }
+
+    private void markAppleFailure(
+            Delete body,
+            Fingerprint key
+    ) {
+        try {
+            // 커밋 응답만 유실된 경우 이미 접수한 작업을
+            // 실패로 바꾸지 않는다.
+            if (repository.find(key.actor()).isEmpty()) {
+                challenges.fail(
+                        body.nonce(),
+                        appleRequestHash(key)
+                );
+            }
+        } catch (DataAccessException | TransactionException ex) {
+            // 이 표시도 실패하면 60초 진행 기한 뒤
+            // 새 Apple 인증을 요구한다.
+            MemberService.logStorage(
+                    "appleDeletionFailureMarker",
+                    ex
+            );
+        }
     }
 
     private Reauthenticated verify(
@@ -229,16 +315,9 @@ public class AccountDeletionService {
                         throw Member.reauthenticationFailed();
                     }
 
-                    String requestHash = crypto.tokenHash(
-                            "member-delete:"
-                                    + key.actor()
-                                    + ":"
-                                    + key.key()
-                                    + ":"
-                                    + key.body()
-                    );
+                    String requestHash = appleRequestHash(key);
 
-                    var claim = challenges.consume(
+                    var claim = challenges.consumeForDeletion(
                             body.nonce(),
                             requestHash
                     );
@@ -266,12 +345,7 @@ public class AccountDeletionService {
                                 prepared.refreshToken()
                         );
                     } catch (RuntimeException ex) {
-                        try {
-                            challenges.fail(body.nonce(), requestHash);
-                        } catch (RuntimeException ignored) {
-                            // 이미 소비한 코드를 재교환하지 않는다.
-                        }
-
+                        markAppleFailure(body, key);
                         throw ex;
                     }
                 }
@@ -285,10 +359,15 @@ public class AccountDeletionService {
         }
     }
 
-    private void requireSame(Stored stored, Fingerprint key) {
+    private void requireSame(
+            Stored stored,
+            Fingerprint key
+    ) {
         if (!crypto.matches(stored.key(), key.key())
                 || !crypto.matches(stored.body(), key.body())) {
-            throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
+            throw new BusinessException(
+                    ErrorCode.IDEMPOTENCY_CONFLICT
+            );
         }
 
         if (stored.createdAt().isAfter(clock.instant())

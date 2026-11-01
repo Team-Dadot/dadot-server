@@ -7,6 +7,7 @@ import com.dadot.server.domain.disclosure.model.DisclosureReview.Request;
 import com.dadot.server.domain.disclosure.model.DisclosureReview.Result;
 import com.dadot.server.domain.disclosure.model.DisclosureReview.Status;
 import com.dadot.server.domain.disclosure.repository.DisclosureReviewRepository;
+import com.dadot.server.domain.interview.repository.InterviewDisclosureImpactRepository;
 import com.dadot.server.domain.quiz.repository.QuizDisclosureImpactRepository;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
@@ -36,6 +37,7 @@ public class DisclosureReviewService {
     private final DisclosureReviewRepository repository;
     private final AdminAccess access;
     private final QuizDisclosureImpactRepository quizImpact;
+    private final InterviewDisclosureImpactRepository interviewImpact;
     private final CompanyLogoUrlResolver logos;
     private final Clock clock;
     private final TransactionTemplate write;
@@ -44,6 +46,7 @@ public class DisclosureReviewService {
             DisclosureReviewRepository repository,
             AdminAccess access,
             QuizDisclosureImpactRepository quizImpact,
+            InterviewDisclosureImpactRepository interviewImpact,
             CompanyLogoUrlResolver logos,
             Clock clock,
             PlatformTransactionManager manager
@@ -51,6 +54,7 @@ public class DisclosureReviewService {
         this.repository = repository;
         this.access = access;
         this.quizImpact = quizImpact;
+        this.interviewImpact = interviewImpact;
         this.logos = logos;
         this.clock = clock;
 
@@ -268,13 +272,13 @@ public class DisclosureReviewService {
                 now
         );
 
-        // 면접 테이블·API는 아직 없으며 도입 시 해당 영향 처리도 연결한다.
+        long affectedInterviews = interviewImpact.invalidate(companyId, changedDisclosures, now);
         access.require(actor, true);
 
         return new Result(
                 result,
                 affectedQuizzes,
-                0
+                affectedInterviews
         );
     }
 

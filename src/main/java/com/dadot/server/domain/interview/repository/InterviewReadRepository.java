@@ -331,7 +331,7 @@ public class InterviewReadRepository {
                   on t.source_attempt_id = a.id
                  and t.type = 'INTERVIEW_EVALUATION'
                 where s.question_id = ?
-                order by s.submitted_at desc, s.id desc
+                order by s.attempt_number desc
                 limit 1
                 """,
                 (rs, n) -> {

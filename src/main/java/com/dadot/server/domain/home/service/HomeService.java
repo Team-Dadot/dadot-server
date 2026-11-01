@@ -10,6 +10,7 @@ import com.dadot.server.domain.home.repository.HomeRepository;
 import com.dadot.server.domain.home.repository.HomeRepository.ProfileRow;
 import com.dadot.server.domain.home.support.ProfileImageUrlResolver;
 import com.dadot.server.domain.quiz.repository.QuizPlayRepository;
+import com.dadot.server.domain.interview.repository.InterviewStatisticsRepository;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import com.dadot.server.global.security.SessionAuthenticationToken;
@@ -49,13 +50,14 @@ public class HomeService {
     private final CompanyLogoUrlResolver logos;
     private final ProfileImageUrlResolver images;
     private final Clock clock;
+    private final InterviewStatisticsRepository interviews;
     private final TransactionTemplate read;
     private final TransactionTemplate write;
 
     public HomeService(HomeRepository repository, PreparationCompanyRepository companies,
                        QuizPlayRepository quizzes, UserAccess access,
                        CompanyLogoUrlResolver logos, ProfileImageUrlResolver images,
-                       Clock clock, PlatformTransactionManager manager) {
+                       Clock clock, InterviewStatisticsRepository interviews, PlatformTransactionManager manager) {
         this.repository = repository;
         this.companies = companies;
         this.quizzes = quizzes;
@@ -63,6 +65,7 @@ public class HomeService {
         this.logos = logos;
         this.images = images;
         this.clock = clock;
+        this.interviews = interviews;
         read = transaction(manager, true);
         write = transaction(manager, false);
     }
@@ -83,13 +86,12 @@ public class HomeService {
             Instant now = clock.instant();
             LocalDate today = now.atZone(KST).toLocalDate();
             Instant reset = today.plusDays(1).atStartOfDay(KST).toInstant();
-            Item item = item(user, target, today, reset);
-            String action = item.quizToday().completed() ? "START_INTERVIEW"
-                    : item.quizToday().quizSetId() == null ? "START_QUIZ" : "CONTINUE_QUIZ";
+            Item item = item(user, target, today, now);
+            String action = interviews.nextAction(user, requested, item.quizToday(), item.interviewToday(), now);
 
             return new Dashboard(
                     new Profile(user, profile.nickname(), profileImage(user, profile.imageKey())),
-                    item, quizzes.accuracy(user, requested), EvaluationSummary.unavailable(),
+                    item, quizzes.accuracy(user, requested), interviews.summary(user, requested, target.jobId()),
                     today, reset, action);
         })));
     }
@@ -115,7 +117,7 @@ public class HomeService {
         })));
     }
 
-    private Item item(long user, Row row, LocalDate today, Instant reset) {
+    private Item item(long user, Row row, LocalDate today, Instant now) {
         QuizToday quiz = companies.quizzes(user, today, List.of(row.companyId()))
                 .getOrDefault(row.companyId(), new QuizToday(null, 0, 5, false));
         Long days = row.interviewDate() == null ? null
@@ -128,7 +130,7 @@ public class HomeService {
                 row.interviewDate(), days, schedule,
                 days != null && days >= 0 && days <= 3 ? "FOCUS" : "NORMAL",
                 row.selected(), row.version(), quiz,
-                new InterviewToday(today, 9, 0, 9, reset, 3, 0, 3));
+                interviews.today(user, List.of(row.companyId()), now).get(row.companyId()));
     }
 
     private static void completed(ProfileRow profile) {

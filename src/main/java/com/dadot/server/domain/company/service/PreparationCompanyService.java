@@ -7,6 +7,7 @@ import com.dadot.server.domain.company.repository.PreparationCompanyRepository.R
 import com.dadot.server.domain.company.repository.PreparationCompanyRepository.State;
 import com.dadot.server.domain.company.repository.PreparationCompanyRequestStore;
 import com.dadot.server.domain.company.support.CompanyLogoUrlResolver;
+import com.dadot.server.domain.interview.repository.InterviewStatisticsRepository;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import com.dadot.server.global.security.SessionAuthenticationToken;
@@ -47,6 +48,7 @@ public class PreparationCompanyService {
     private final UserAccess access;
     private final CompanyLogoUrlResolver logos;
     private final Clock clock;
+    private final InterviewStatisticsRepository interviews;
     private final TransactionTemplate read;
     private final TransactionTemplate write;
 
@@ -56,6 +58,7 @@ public class PreparationCompanyService {
             UserAccess access,
             CompanyLogoUrlResolver logos,
             Clock clock,
+            InterviewStatisticsRepository interviews,
             PlatformTransactionManager manager
     ) {
         this.repository = repository;
@@ -63,6 +66,7 @@ public class PreparationCompanyService {
         this.access = access;
         this.logos = logos;
         this.clock = clock;
+        this.interviews = interviews;
         read = transaction(manager, true);
         write = transaction(manager, false);
     }
@@ -324,15 +328,7 @@ public class PreparationCompanyService {
                 user, today,
                 rows.stream().map(Row::companyId).toList());
 
-        var interview = new InterviewToday(
-                today,
-                9,
-                0,
-                9,
-                today.plusDays(1).atStartOfDay(KST).toInstant(),
-                3,
-                0,
-                3);
+        var interview = interviews.today(user, rows.stream().map(Row::companyId).toList(), now);
 
         return rows.stream().map(row -> {
             Long days = row.interviewDate() == null
@@ -368,7 +364,7 @@ public class PreparationCompanyService {
                     quizzes.getOrDefault(
                             row.companyId(),
                             new QuizToday(null, 0, 5, false)),
-                    interview);
+                    interview.get(row.companyId()));
         }).toList();
     }
 

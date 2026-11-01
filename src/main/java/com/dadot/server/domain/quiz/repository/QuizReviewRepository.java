@@ -23,6 +23,9 @@ public class QuizReviewRepository {
                 uc.active_slot is not null or exists (
                     select 1 from quiz_answers a
                     where a.user_id = uc.user_id and a.company_id = uc.company_id
+                ) or exists (
+                    select 1 from interview_questions q
+                    where q.user_id = uc.user_id and q.company_id = uc.company_id
                 )
             )
             """;
@@ -39,7 +42,7 @@ public class QuizReviewRepository {
             """;
 
     public record CompanyRow(long id, String name, String industry, String logoKey, boolean active) {}
-    public record Companies(List<CompanyRow> rows, Map<Long, Long> quizCounts, long total) {}
+    public record Companies(List<CompanyRow> rows, Map<Long, Long> quizCounts, Map<Long, Long> interviewCounts, long total) {}
     public record Counts(long all, long incorrect) {}
     public record SubmittedItem(long setId, long itemId, long answerId) {}
 
@@ -47,7 +50,7 @@ public class QuizReviewRepository {
         long total = Objects.requireNonNull(jdbc.queryForObject(
                 "select count(*) " + REVIEW_COMPANIES, Long.class, user));
         if (paging.offset() >= total) {
-            return new Companies(List.of(), Map.of(), total);
+            return new Companies(List.of(), Map.of(), Map.of(), total);
         }
         var rows = jdbc.query("""
                 select c.id, c.name, c.industry, c.logo_key, uc.active_slot is not null
@@ -67,7 +70,14 @@ public class QuizReviewRepository {
                 """ + marks(rows.size()) + ") group by company_id", rs -> {
             counts.put(rs.getLong(1), rs.getLong(2));
         }, args.toArray());
-        return new Companies(List.copyOf(rows), Map.copyOf(counts), total);
+        Map<Long, Long> interviews = new HashMap<>();
+        jdbc.query("""
+                select company_id, count(*) from interview_questions
+                where user_id = ? and company_id in (
+                """ + marks(rows.size()) + ") group by company_id", rs -> {
+            interviews.put(rs.getLong(1), rs.getLong(2));
+        }, args.toArray());
+        return new Companies(List.copyOf(rows), Map.copyOf(counts), Map.copyOf(interviews), total);
     }
 
     public void requireCompany(long user, long company) {
@@ -78,6 +88,9 @@ public class QuizReviewRepository {
                       and (uc.active_slot is not null or exists (
                           select 1 from quiz_answers a
                           where a.user_id = uc.user_id and a.company_id = uc.company_id
+                      ) or exists (
+                          select 1 from interview_questions q
+                          where q.user_id = uc.user_id and q.company_id = uc.company_id
                       ))
                 )
                 """, Boolean.class, user, company))) {

@@ -60,8 +60,7 @@ public class QuizReviewService {
             var content = page.rows().stream().map(company -> new CompanyItem(
                     new QuizPlay.Company(company.id(), company.name(), company.industry(), logo(company)),
                     company.active(), page.quizCounts().getOrDefault(company.id(), 0L),
-                    // 면접 질문 저장 기능 도입 전이므로 현재 면접 기록은 존재하지 않는다.
-                    0L
+                    page.interviewCounts().getOrDefault(company.id(), 0L)
             )).toList();
             return new CompanyPage(content, paging.page(), paging.size(), page.total(),
                     paging.totalPages(page.total()), paging.hasNext(page.total()));

@@ -26,6 +26,7 @@ public class SessionJwtAuthenticationConverter
 
     private final JdbcTemplate jdbc;
     private final Clock clock;
+    private final com.dadot.server.domain.member.repository.AccountDeletionRepository deletions;
 
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
@@ -86,7 +87,27 @@ public class SessionJwtAuthenticationConverter
             );
 
             if (roles.isEmpty()) {
-                throw invalidToken();
+                if (!deletions.canReplay(
+                        userId,
+                        sessionId,
+                        version.intValue(),
+                        clock.instant()
+                )) {
+                    throw invalidToken();
+                }
+
+                // 서명·만료 검증을 통과한 원래 세션은
+                // 탈퇴 요청 재확인에만 쓴다.
+                return new SessionAuthenticationToken(
+                        new UserPrincipal(userId),
+                        sessionId,
+                        version.intValue(),
+                        List.of(
+                                new SimpleGrantedAuthority(
+                                        "ROLE_ACCOUNT_DELETION"
+                                )
+                        )
+                );
             }
 
             return new SessionAuthenticationToken(

@@ -10,6 +10,9 @@ spring:
     port: 1025
 
 app:
+  account-deletion:
+    worker-enabled: false
+
   jwt:
     # 테스트 전용 공개 값
     secret-base64: AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=

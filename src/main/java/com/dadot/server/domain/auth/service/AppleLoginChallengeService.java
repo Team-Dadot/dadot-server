@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -60,6 +61,32 @@ public class AppleLoginChallengeService {
             String nonce,
             String requestHash
     ) {
+        return consume(nonce, requestHash, null);
+    }
+
+    // 탈퇴 코드 교환과 접수의 정상 진행 시간만 기다린다.
+    // 프로세스 중단이나 실패 표시 저장 장애 후에도 같은 코드를
+    // 다시 교환하지 않고 새 인증을 요구한다.
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            timeout = 5
+    )
+    public Claim consumeForDeletion(
+            String nonce,
+            String requestHash
+    ) {
+        return consume(
+                nonce,
+                requestHash,
+                Duration.ofSeconds(60)
+        );
+    }
+
+    private Claim consume(
+            String nonce,
+            String requestHash,
+            Duration processingWindow
+    ) {
         String hash = crypto.tokenHash(nonce);
 
         var stored = jdbc.query(
@@ -106,6 +133,26 @@ public class AppleLoginChallengeService {
             throw invalid();
         }
 
+        Instant validUntil = stored.expiresAt();
+
+        if (processingWindow != null) {
+            Instant started =
+                    stored.consumedAt() == null
+                            ? now
+                            : stored.consumedAt()
+                            .toInstant(ZoneOffset.UTC);
+
+            Instant deadline = started.plus(processingWindow);
+
+            if (deadline.isBefore(validUntil)) {
+                validUntil = deadline;
+            }
+
+            if (!validUntil.isAfter(now)) {
+                throw invalid();
+            }
+        }
+
         if (stored.consumedAt() != null) {
             if (!crypto.matches(
                     stored.requestHash(),
@@ -114,10 +161,7 @@ public class AppleLoginChallengeService {
                 throw invalid();
             }
 
-            return new Claim(
-                    stored.expiresAt(),
-                    false
-            );
+            return new Claim(validUntil, false);
         }
 
         jdbc.update(
@@ -132,10 +176,7 @@ public class AppleLoginChallengeService {
                 hash
         );
 
-        return new Claim(
-                stored.expiresAt(),
-                true
-        );
+        return new Claim(validUntil, true);
     }
 
     @Transactional(
@@ -176,8 +217,7 @@ public class AppleLoginChallengeService {
     public record Claim(
             Instant expiresAt,
             boolean owned
-    ) {
-    }
+    ) {}
 
     private record Stored(
             Instant issuedAt,
@@ -185,14 +225,12 @@ public class AppleLoginChallengeService {
             LocalDateTime consumedAt,
             String requestHash,
             LocalDateTime failedAt
-    ) {
-    }
+    ) {}
 
     public record Challenge(
             String nonce,
             Instant expiresAt
     ) {
-
         @Override
         public String toString() {
             return "Challenge[nonce=REDACTED]";

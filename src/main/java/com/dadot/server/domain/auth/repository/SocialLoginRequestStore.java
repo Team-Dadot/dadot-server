@@ -174,6 +174,7 @@ public class SocialLoginRequestStore {
                 """
                 insert into api_idempotency_requests(
                     user_id,
+                    subject_hash,
                     scope_hash,
                     operation,
                     key_hash,
@@ -186,12 +187,13 @@ public class SocialLoginRequestStore {
                     expires_at
                 )
                 values (
-                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
                     'SUCCEEDED', 200,
                     ?, ?, ?, ?
                 )
                 """,
                 result.response().userId(),
+                hmac.hmac("auth-subject", key.provider(), result.subject()),
                 key.scopeHash(),
                 key.operation(),
                 key.keyHash(),

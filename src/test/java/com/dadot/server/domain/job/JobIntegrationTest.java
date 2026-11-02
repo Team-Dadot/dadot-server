@@ -36,6 +36,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -314,15 +315,26 @@ class JobIntegrationTest {
     void explicitlySeedsTheDictionaryAndPopularJobs() throws Exception {
         seed();
         assertEquals(4L, count("job_categories"));
-        assertEquals(24L, count("jobs"));
+        assertEquals(19L, count("jobs"));
+        assertEquals(Set.of(
+                "경영기획", "서비스기획", "인사", "재무·회계", "구매·SCM",
+                "영업", "해외영업", "영업관리", "마케팅", "홍보",
+                "서버개발", "앱개발", "데이터분석", "UX·UI디자인",
+                "연구개발", "생산관리", "생산기술", "품질관리", "품질보증"
+        ), Set.copyOf(jdbc.queryForList("select name from jobs", String.class)));
+        assertEquals(Set.of("경영기획", "인사", "재무·회계", "구매·SCM", "영업", "마케팅"),
+                Set.copyOf(jdbc.queryForList(
+                        "select name from jobs where is_popular = true", String.class)));
         mvc.perform(request().param("popular", "true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(6))
-                .andExpect(jsonPath("$.data.categories[0].categoryName").value("기획·전략"))
-                .andExpect(jsonPath("$.data.categories[3].categoryName").value("경영지원"));
+                .andExpect(jsonPath("$.data.categories[0].categoryName").value("경영·기획"))
+                .andExpect(jsonPath("$.data.categories[1].categoryName").value("영업·마케팅"))
+                .andExpect(jsonPath("$.data.categories[2].categoryName").value("개발·디자인"))
+                .andExpect(jsonPath("$.data.categories[3].categoryName").value("연구·생산"));
         mvc.perform(request().param("query", "해외영업"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].categoryName").value("영업·무역"));
+                .andExpect(jsonPath("$.data.content[0].categoryName").value("영업·마케팅"));
     }
 
     @Test
@@ -330,17 +342,17 @@ class JobIntegrationTest {
         seed();
         Map<String, Long> categoryIds = ids("job_categories");
         Map<String, Long> jobIds = ids("jobs");
-        jdbc.update("update job_categories set display_order = 99 where name = '영업·무역'");
+        jdbc.update("update job_categories set display_order = 99 where name = '영업·마케팅'");
         jdbc.update("update jobs set is_active = false, is_popular = true where name = '해외영업'");
         long extra = category("별도분류", 100);
         job(extra, "별도직무", false, true);
         seed();
         assertEquals(5L, count("job_categories"));
-        assertEquals(25L, count("jobs"));
+        assertEquals(20L, count("jobs"));
         categoryIds.forEach((key, id) -> assertEquals(id, ids("job_categories").get(key)));
         jobIds.forEach((key, id) -> assertEquals(id, ids("jobs").get(key)));
         assertEquals(99, jdbc.queryForObject(
-                "select display_order from job_categories where name = '영업·무역'", Integer.class));
+                "select display_order from job_categories where name = '영업·마케팅'", Integer.class));
         assertEquals(1L, jdbc.queryForObject("""
                 select count(*) from jobs
                 where name = '해외영업' and is_active = false and is_popular = true

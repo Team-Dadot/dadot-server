@@ -123,6 +123,7 @@ class InterviewEvaluationIntegrationTest {
     @AfterEach
     void cleanup() {
         if (!safe) return;
+        InterviewTestDataCleanup.deleteEvaluationTasks(jdbc, company);
         reset(clock, requests, client, evaluationClient, resultRepository);
         jdbc.update("delete l from evaluation_material_links l join interview_evaluations e on e.id = l.evaluation_id where e.user_id = ?", user);
         jdbc.update("delete s from evaluation_scores s join interview_evaluations e on e.id = s.evaluation_id where e.user_id = ?", user);
@@ -457,7 +458,9 @@ class InterviewEvaluationIntegrationTest {
         mvc.perform(get("/v1/interview-attempts/" + attempt + "/evaluation").header("Authorization", "Bearer " + other)).andExpect(status().isNotFound());
         mvc.perform(post("/v1/interview-attempts/" + attempt + "/evaluation-tasks").header("Authorization", "Bearer " + other).header("Idempotency-Key", key())).andExpect(status().isNotFound());
         String key = key(); retry(attempt, key).andExpect(status().isAccepted());
-        jdbc.update("delete from interview_attempts where id = ?", attempt);
+        mvc.perform(delete("/v1/interview-attempts/" + attempt)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNoContent());
         error(retry(attempt, key), 404, "RESOURCE_NOT_FOUND");
     }
 

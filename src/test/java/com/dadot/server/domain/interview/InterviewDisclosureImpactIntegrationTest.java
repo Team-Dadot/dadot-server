@@ -120,6 +120,7 @@ class InterviewDisclosureImpactIntegrationTest {
     @AfterEach
     void cleanup() {
         if (!safe) return;
+        InterviewTestDataCleanup.deleteEvaluationTasks(jdbc, company);
         reset(impact, generator, evaluator);
         jdbc.update("delete l from evaluation_material_links l join interview_evaluations e on e.id = l.evaluation_id where e.user_id in (?, ?)", user, generatingUser);
         jdbc.update("delete s from evaluation_scores s join interview_evaluations e on e.id = s.evaluation_id where e.user_id in (?, ?)", user, generatingUser);

@@ -101,6 +101,7 @@ class InterviewSubmissionIntegrationTest {
     @AfterEach
     void cleanup() {
         if (!safe) return;
+        InterviewTestDataCleanup.deleteEvaluationTasks(jdbc, company);
         reset(clock, requests, client);
         for (String table : List.of("interview_question_evidence", "interview_drafts", "interview_attempts",
                 "interview_submissions", "interview_daily_questions", "interview_questions", "interview_question_keys")) {
@@ -257,7 +258,9 @@ class InterviewSubmissionIntegrationTest {
     void deletedAttemptIsNotRecreatedByReplay() throws Exception {
         String key = key();
         JsonNode result = data(submit(question, key, "{\"text\":\"답변\"}").andExpect(status().isAccepted()));
-        jdbc.update("delete from interview_attempts where id = ?", result.get("attemptId").asLong());
+        mvc.perform(delete("/v1/interview-attempts/" + result.get("attemptId").asLong())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNoContent());
         error(submit(question, key, "{\"text\":\"답변\"}"), 404, "RESOURCE_NOT_FOUND");
         error(detail(result.get("attemptId").asLong(), token), 404, "RESOURCE_NOT_FOUND");
         assertEquals(1, count("select count(*) from interview_submissions where user_id = ?", user));
@@ -308,7 +311,12 @@ class InterviewSubmissionIntegrationTest {
             assertEquals(i, result.get("attemptNumber").asInt());
             finish();
         }
-        jdbc.update("delete from interview_attempts where user_id = ?", user);
+        for (long attempt : jdbc.query("select id from interview_attempts where user_id = ?",
+                (rs, row) -> rs.getLong(1), user)) {
+            mvc.perform(delete("/v1/interview-attempts/" + attempt)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isNoContent());
+        }
         doReturn(Instant.parse("2026-10-31T15:01:00Z")).when(clock).instant();
         error(submit(question, key(), "{\"text\":\"4번째\"}"), 409, "QUESTION_LIMIT_EXCEEDED");
         error(draft(question, "초안", null), 409, "QUESTION_LIMIT_EXCEEDED");

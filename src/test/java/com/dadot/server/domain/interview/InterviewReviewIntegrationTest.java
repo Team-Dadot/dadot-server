@@ -122,6 +122,7 @@ class InterviewReviewIntegrationTest {
     @AfterEach
     void cleanup() {
         if (!safe) return;
+        InterviewTestDataCleanup.deleteEvaluationTasks(jdbc, company);
         reset(clock, evaluationClient, resultRepository, reviews);
         jdbc.update("delete l from evaluation_material_links l join interview_evaluations e on e.id = l.evaluation_id where e.user_id = ?", user);
         jdbc.update("delete s from evaluation_scores s join interview_evaluations e on e.id = s.evaluation_id where e.user_id = ?", user);
@@ -424,11 +425,17 @@ class InterviewReviewIntegrationTest {
     @Test
     void sharedContextRemainsWhenAnotherRecordStillReferencesIt() throws Exception {
         JsonNode accepted = accepted(question); long attempt = accepted.get("attemptId").asLong();
-        String context = jdbc.queryForObject("select context_id from interview_questions where id = ?", String.class, question);
-        jdbc.update("update interview_attempts set context_id = ? where id = ?", context, attempt);
-        jdbc.update("update ai_tasks set context_id = ? where id = ?", context, accepted.get("taskId").asText());
+        String context = jdbc.queryForObject("select context_id from interview_attempts where id = ?", String.class, attempt);
+        String sharingTask = key();
+        jdbc.update("""
+                insert into ai_tasks(id, user_id, company_id, type, status, context_id,
+                    policy_version_id, request_key_hash, request_body_hmac)
+                values (?, ?, ?, 'INTERVIEW_GENERATION', 'SUCCEEDED', ?, ?, ?, ?)
+                """, sharingTask, user, company, context, generationPolicy,
+                InterviewGeneration.sha256(key()), InterviewGeneration.sha256(key()));
         removeAttempt(attempt).andExpect(status().isNoContent());
         assertEquals(1, count("select count(*) from ai_contexts where id = ?", context));
+        assertEquals(1, count("select count(*) from ai_tasks where id = ?", sharingTask));
         mvc.perform(get("/v1/interview-questions/" + question).header("Authorization", "Bearer " + token)).andExpect(status().isOk());
     }
 

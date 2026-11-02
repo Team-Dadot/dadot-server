@@ -4,6 +4,171 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    REAUTHENTICATION_FAILED(
+            HttpStatus.UNAUTHORIZED,
+            "본인 인증을 다시 진행해 주세요."
+    ),
+    ACCOUNT_DELETION_PENDING(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "계정 삭제 처리가 진행 중입니다."
+    ),
+
+    EVALUATION_ALREADY_SUCCEEDED(
+            HttpStatus.CONFLICT,
+            "이미 평가가 완료되었습니다."
+    ),
+    CONTEXT_UNAVAILABLE(
+            HttpStatus.CONFLICT,
+            "평가에 필요한 자료를 사용할 수 없어 재처리할 수 없습니다."
+    ),
+
+    QUESTION_LIMIT_EXCEEDED(
+            HttpStatus.CONFLICT,
+            "이 질문의 제출 기회를 모두 사용했습니다."
+    ),
+    COMPANY_INACTIVE(
+            HttpStatus.CONFLICT,
+            "기업을 다시 추가한 뒤 작성해 주세요."
+    ),
+    TASK_PROCESSING(
+            HttpStatus.CONFLICT,
+            "이 질문의 답변을 평가 중입니다. 잠시 후 다시 시도해 주세요."
+    ),
+
+    EXISTING_QUESTION_AVAILABLE(
+            HttpStatus.CONFLICT,
+            "이어 쓸 질문이 있습니다."
+    ),
+    DAILY_LIMIT_EXCEEDED(
+            HttpStatus.CONFLICT,
+            "오늘 이 기업의 면접 질문 또는 답변 한도에 도달했습니다."
+    ),
+    INTERVIEW_INPUT_TOO_LARGE(
+            HttpStatus.CONFLICT,
+            "면접 처리 자료가 입력 한도를 초과했습니다."
+    ),
+
+    POLICY_ALREADY_EXISTS(
+            HttpStatus.CONFLICT,
+            "같은 유형과 범위의 정책이 있습니다. sourcePolicyId로 새 버전을 등록해 주세요."
+    ),
+    POLICY_NOT_CONFIGURED(
+            HttpStatus.CONFLICT,
+            "면접 생성·평가 기준을 확인해 주세요."
+    ),
+
+    EXPERIENCE_LIMIT_EXCEEDED(
+            HttpStatus.CONFLICT,
+            "경험은 최대 100개까지 등록할 수 있습니다."
+    ),
+
+    ONBOARDING_REQUIRED(
+            HttpStatus.CONFLICT,
+            "온보딩을 먼저 완료해 주세요."
+    ),
+
+    COMPANY_LIMIT_EXCEEDED(
+            HttpStatus.CONFLICT,
+            "준비 기업은 최대 5개입니다."
+    ),
+    COMPANY_ALREADY_ACTIVE(
+            HttpStatus.CONFLICT,
+            "이미 준비 중인 기업입니다."
+    ),
+    MIN_COMPANY_REQUIRED(
+            HttpStatus.CONFLICT,
+            "준비 기업은 최소 1개가 필요합니다."
+    ),
+
+    QUIZ_BANK_INSUFFICIENT(
+            HttpStatus.CONFLICT,
+            "오늘 퀴즈를 준비 중입니다. 잠시 후 다시 시도해 주세요."
+    ),
+    QUIZ_SET_NOT_COMPLETED(
+            HttpStatus.CONFLICT,
+            "모든 문항을 제출한 뒤 결과를 확인해 주세요."
+    ),
+    QUIZ_SET_EXPIRED(
+            HttpStatus.CONFLICT,
+            "오늘의 새 퀴즈를 시작해 주세요."
+    ),
+    ANSWER_ALREADY_SUBMITTED(
+            HttpStatus.CONFLICT,
+            "이미 제출한 답변입니다."
+    ),
+    INVALID_ITEM_ORDER(
+            HttpStatus.CONFLICT,
+            "현재 문항부터 제출해 주세요."
+    ),
+
+    CONTENT_UNAVAILABLE(
+            HttpStatus.CONFLICT,
+            "근거 자료가 변경되었거나 현재 제공할 수 없습니다."
+    ),
+    INVALID_STATUS_TRANSITION(
+            HttpStatus.CONFLICT,
+            "허용되지 않은 상태 변경입니다."
+    ),
+    ONBOARDING_INCOMPLETE(
+            HttpStatus.CONFLICT,
+            "기업과 직무 등 필수 단계를 확인해 주세요."
+    ),
+    VERSION_CONFLICT(
+            HttpStatus.CONFLICT,
+            "정보가 변경되었습니다. 다시 조회해 주세요."
+    ),
+    IDEMPOTENCY_KEY_EXPIRED(
+            HttpStatus.CONFLICT,
+            "요청 키가 만료되었습니다. 새 요청 키를 사용해 주세요."
+    ),
+    PASSWORD_AUTH_UNAVAILABLE(
+            HttpStatus.CONFLICT,
+            "이메일 로그인 계정에서만 변경할 수 있습니다."
+    ),
+    INVALID_REGISTRATION_TOKEN(
+            HttpStatus.UNAUTHORIZED,
+            "소셜 인증을 다시 진행해 주세요."
+    ),
+    SOCIAL_ACCOUNT_ALREADY_REGISTERED(
+            HttpStatus.CONFLICT,
+            "이미 가입된 계정입니다. 소셜 로그인을 다시 진행해 주세요."
+    ),
+    INVALID_SOCIAL_CREDENTIAL(
+            HttpStatus.UNAUTHORIZED,
+            "소셜 로그인을 다시 진행해 주세요."
+    ),
+    INVALID_CREDENTIALS(
+            HttpStatus.UNAUTHORIZED,
+            "이메일 또는 비밀번호를 확인해 주세요."
+    ),
+    INVALID_VERIFICATION_TOKEN(
+            HttpStatus.UNAUTHORIZED,
+            "이메일 인증을 다시 진행해 주세요."
+    ),
+    TERMS_NOT_ACCEPTED(
+            HttpStatus.BAD_REQUEST,
+            "필수 이용약관에 동의해 주세요."
+    ),
+    TERMS_CHANGED(
+            HttpStatus.CONFLICT,
+            "가입 약관이 변경되었습니다. 최신 내용을 확인해 주세요."
+    ),
+    SIGNUP_TERMS_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "가입 약관을 준비 중입니다. 잠시 후 다시 시도해 주세요."
+    ),
+    INVALID_VERIFICATION_CODE(
+            HttpStatus.BAD_REQUEST,
+            "인증번호가 올바르지 않습니다."
+    ),
+    VERIFICATION_EXPIRED(
+            HttpStatus.GONE,
+            "인증번호 또는 인증 증빙이 만료되었거나 사용할 수 없습니다."
+    ),
+    VERIFICATION_ATTEMPTS_EXCEEDED(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "인증 시도 횟수를 초과했습니다."
+    ),
     IMAGE_TOO_LARGE(
             HttpStatus.CONTENT_TOO_LARGE,
             "프로필 이미지는 5MiB 이하여야 합니다."
@@ -47,6 +212,18 @@ public enum ErrorCode {
     INTERNAL_SERVER_ERROR(
             HttpStatus.INTERNAL_SERVER_ERROR,
             "서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+    ),
+    EMAIL_ALREADY_REGISTERED(
+            HttpStatus.CONFLICT,
+            "가입된 이메일입니다."
+    ),
+    RATE_LIMITED(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "요청이 많습니다. 잠시 후 다시 시도해 주세요."
+    ),
+    IDEMPOTENCY_CONFLICT(
+            HttpStatus.CONFLICT,
+            "동일 요청 키에 다른 내용이 전달되었거나 재사용할 수 없는 키입니다."
     ),
     SERVICE_UNAVAILABLE(
             HttpStatus.SERVICE_UNAVAILABLE,

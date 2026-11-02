@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   build-test:
@@ -76,3 +77,149 @@ jobs:
             build/reports/jacoco/test/
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Generate coverage summary
+        if: ${{ !cancelled() && hashFiles('build/reports/jacoco/test/jacocoTestReport.xml') != '' }}
+        shell: python
+        run: |
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          report_path = Path(
+              "build/reports/jacoco/test/jacocoTestReport.xml"
+          )
+          root = ET.parse(report_path).getroot()
+
+          counters = {
+              counter.attrib["type"]: counter.attrib
+              for counter in root.findall("counter")
+          }
+
+          lines = [
+              "| 항목 | 커버리지 | 실행 / 전체 |",
+              "| --- | ---: | ---: |",
+          ]
+
+          for metric, label in [
+              ("LINE", "라인"),
+              ("BRANCH", "조건 분기"),
+          ]:
+              counter = counters.get(metric)
+
+              if counter is None:
+                  raise ValueError(
+                      f"Missing JaCoCo counter: {metric}"
+                  )
+
+              covered = int(counter["covered"])
+              missed = int(counter["missed"])
+              total = covered + missed
+
+              rate = (
+                  f"{covered / total * 100:.2f}%"
+                  if total else "N/A"
+              )
+
+              lines.append(
+                  f"| {label} | {rate} | {covered} / {total} |"
+              )
+
+          markdown = "\n".join(lines) + "\n"
+
+          Path(
+              "build/reports/jacoco/coverage-comment.md"
+          ).write_text(markdown, encoding="utf-8")
+
+          with open(
+              os.environ["GITHUB_STEP_SUMMARY"],
+              "a",
+              encoding="utf-8",
+          ) as summary:
+              summary.write("### JaCoCo 커버리지\n\n")
+              summary.write(markdown)
+              summary.write(
+                  "\n테스트 통과 여부는 CI 결과를 확인해 주세요.\n"
+              )
+
+      - name: Comment coverage on PR
+        if: >-
+          ${{
+            !cancelled()
+            && github.event_name == 'pull_request'
+            && github.event.pull_request.head.repo.full_name == github.repository
+            && hashFiles('build/reports/jacoco/coverage-comment.md') != ''
+          }}
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('node:fs');
+            const marker = '<!-- dadot-jacoco-coverage -->';
+            const issueNumber = context.payload.pull_request.number;
+            const headSha = context.payload.pull_request.head.sha;
+            const repo = context.repo;
+
+            const { data: pullRequest } = await github.rest.pulls.get({
+              ...repo,
+              pull_number: issueNumber,
+            });
+
+            if (
+              pullRequest.state !== 'open'
+              || pullRequest.head.sha !== headSha
+            ) {
+              core.info(
+                '현재 PR의 최신 실행이 아니므로 댓글을 생략합니다.'
+              );
+              return;
+            }
+
+            const report = fs.readFileSync(
+              'build/reports/jacoco/coverage-comment.md',
+              'utf8',
+            );
+
+            const runUrl =
+              `${context.serverUrl}/${repo.owner}/${repo.repo}`
+              + `/actions/runs/${context.runId}`;
+
+            const body = [
+              marker,
+              '### JaCoCo 커버리지',
+              '',
+              `기준 커밋: ${headSha}`,
+              '',
+              report,
+              `[CI 실행 결과](${runUrl})`,
+              '',
+              '테스트 통과 여부는 CI 결과를 확인해 주세요.',
+            ].join('\n');
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                ...repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              },
+            );
+
+            const previous = comments.find(
+              comment =>
+                comment.user?.login === 'github-actions[bot]'
+                && comment.body?.startsWith(marker),
+            );
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                ...repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...repo,
+                issue_number: issueNumber,
+                body,
+              });
+            }

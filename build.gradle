@@ -27,6 +27,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
 
     // Database
     implementation 'org.flywaydb:flyway-mysql'
@@ -50,6 +51,8 @@ dependencies {
     testCompileOnly 'org.projectlombok:lombok'
     testAnnotationProcessor 'org.projectlombok:lombok'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
 }
 
 jacoco {
@@ -58,6 +61,14 @@ jacoco {
 
 tasks.named('test') {
     useJUnitPlatform()
+
+    // 셸의 운영 설정을 상속해도 테스트가 실제 AI 평가 워커를 실행하지 않게 한다.
+    environment 'APP_INTERVIEW_EVALUATION_ENABLED', 'false'
+    environment 'APP_INTERVIEW_EVALUATION_WORKER_ENABLED', 'false'
+
+    // 여러 테스트 컨텍스트의 연결 풀이 동시에 누적되지 않도록 제한한다.
+    systemProperty 'spring.test.context.cache.maxSize', '8'
+
     finalizedBy tasks.named('jacocoTestReport')
 }
 

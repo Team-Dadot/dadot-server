@@ -1,0 +1,69 @@
+name: dadot-bootstrap
+
+services:
+  app:
+    image: ${DADOT_IMAGE:-dadot-server:bootstrap}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    read_only: true
+    mem_limit: 640m
+    pids_limit: 512
+    stop_grace_period: 45s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - path: /etc/dadot/app.env
+        required: true
+        format: raw
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_ADDRESS: 0.0.0.0
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx384m -XX:MaxDirectMemorySize=64m"
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "5"
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "1"
+      MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+      MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,db"
+      APP_DART_ENABLED: "false"
+      APP_DART_WORKER_ENABLED: "false"
+      APP_DART_ORIGINALS_ENABLED: "false"
+      APP_DART_ORIGINALS_ROOT: /app/data/originals
+      APP_QUIZ_GENERATION_ENABLED: "false"
+      APP_QUIZ_GENERATION_WORKER_ENABLED: "false"
+      APP_INTERVIEW_GENERATION_ENABLED: "false"
+      APP_INTERVIEW_GENERATION_WORKER_ENABLED: "false"
+      APP_INTERVIEW_EVALUATION_ENABLED: "false"
+      APP_INTERVIEW_EVALUATION_WORKER_ENABLED: "false"
+      APP_ACCOUNT_DELETION_WORKER_ENABLED: "false"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - type: bind
+        source: /etc/dadot/rds-ca.pem
+        target: /run/certs/rds-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /var/lib/dadot/originals
+        target: /app/data/originals
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "4", "http://127.0.0.1:8080/actuator/health/readiness"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

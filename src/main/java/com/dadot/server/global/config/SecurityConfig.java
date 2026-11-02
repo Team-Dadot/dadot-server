@@ -1,6 +1,7 @@
 package com.dadot.server.global.config;
 
 import com.dadot.server.global.security.SecurityExceptionHandler;
+import com.dadot.server.global.security.SessionJwtAuthenticationConverter;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -24,14 +25,18 @@ public class SecurityConfig {
             HttpSecurity http,
             CorsConfigurationSource corsConfigurationSource,
             SecurityExceptionHandler exceptionHandler,
+            SessionJwtAuthenticationConverter jwtAuthentication,
             @Value("${springdoc.api-docs.enabled:false}")
             boolean apiDocsEnabled
     ) throws Exception {
+
         http
                 .csrf(AbstractHttpConfigurer::disable)
 
                 .cors(cors ->
-                        cors.configurationSource(corsConfigurationSource)
+                        cors.configurationSource(
+                                corsConfigurationSource
+                        )
                 )
 
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -50,9 +55,21 @@ public class SecurityConfig {
                         .accessDeniedHandler(exceptionHandler)
                 )
 
+                .oauth2ResourceServer(resource -> resource
+                        .jwt(jwt ->
+                                jwt.jwtAuthenticationConverter(
+                                        jwtAuthentication
+                                )
+                        )
+                        .authenticationEntryPoint(exceptionHandler)
+                        .accessDeniedHandler(exceptionHandler)
+                )
+
                 .authorizeHttpRequests(authorize -> {
                     authorize
-                            .dispatcherTypeMatchers(DispatcherType.ERROR)
+                            .dispatcherTypeMatchers(
+                                    DispatcherType.ERROR
+                            )
                             .permitAll();
 
                     authorize
@@ -72,6 +89,7 @@ public class SecurityConfig {
                                     "/v1/auth/signup",
                                     "/v1/auth/login",
                                     "/v1/auth/social/*",
+                                    "/v1/auth/social/apple/challenges",
                                     "/v1/auth/password/reset"
                             )
                             .permitAll();
@@ -94,8 +112,31 @@ public class SecurityConfig {
                             .hasRole("ADMIN");
 
                     authorize
-                            .requestMatchers("/v1/**")
+                            .requestMatchers(
+                                    HttpMethod.DELETE,
+                                    "/v1/users/me"
+                            )
                             .authenticated();
+
+                    authorize
+                            .requestMatchers("/v1/**")
+                            .access((authentication, context) -> {
+                                var actor = authentication.get();
+
+                                return new org.springframework.security.authorization.AuthorizationDecision(
+                                        actor != null
+                                                && actor.isAuthenticated()
+                                                && !(actor instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)
+                                                && actor.getAuthorities()
+                                                .stream()
+                                                .noneMatch(authority ->
+                                                        "ROLE_ACCOUNT_DELETION"
+                                                                .equals(
+                                                                        authority.getAuthority()
+                                                                )
+                                                )
+                                );
+                            });
 
                     authorize
                             .anyRequest()

@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -32,9 +33,24 @@ public class SecurityExceptionHandler
             HttpServletResponse response,
             AuthenticationException ex
     ) throws IOException {
-        response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
 
-        writeError(response, ErrorCode.UNAUTHENTICATED);
+        if (ex instanceof AuthenticationServiceException) {
+            writeError(
+                    response,
+                    ErrorCode.SERVICE_UNAVAILABLE
+            );
+            return;
+        }
+
+        response.setHeader(
+                HttpHeaders.WWW_AUTHENTICATE,
+                "Bearer"
+        );
+
+        writeError(
+                response,
+                ErrorCode.UNAUTHENTICATED
+        );
     }
 
     @Override
@@ -43,20 +59,38 @@ public class SecurityExceptionHandler
             HttpServletResponse response,
             AccessDeniedException ex
     ) throws IOException {
-        writeError(response, ErrorCode.FORBIDDEN);
+
+        writeError(
+                response,
+                ErrorCode.FORBIDDEN
+        );
     }
 
     private void writeError(
             HttpServletResponse response,
             ErrorCode errorCode
     ) throws IOException {
+
         if (response.isCommitted()) {
             return;
         }
 
-        response.setStatus(errorCode.getStatus().value());
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setHeader(
+                HttpHeaders.CACHE_CONTROL,
+                "no-store"
+        );
+
+        response.setStatus(
+                errorCode.getStatus().value()
+        );
+
+        response.setContentType(
+                MediaType.APPLICATION_JSON_VALUE
+        );
+
+        response.setCharacterEncoding(
+                StandardCharsets.UTF_8.name()
+        );
 
         jsonMapper.writeValue(
                 response.getOutputStream(),

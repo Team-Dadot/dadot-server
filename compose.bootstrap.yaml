@@ -29,9 +29,9 @@ services:
       SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "1"
       MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
       MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,db"
-      APP_DART_ENABLED: "false"
-      APP_DART_WORKER_ENABLED: "false"
-      APP_DART_ORIGINALS_ENABLED: "false"
+      APP_DART_ENABLED: "true"
+      APP_DART_WORKER_ENABLED: "true"
+      APP_DART_ORIGINALS_ENABLED: "true"
       APP_DART_ORIGINALS_ROOT: /app/data/originals
       APP_QUIZ_GENERATION_ENABLED: "false"
       APP_QUIZ_GENERATION_WORKER_ENABLED: "false"
@@ -66,8 +66,8 @@ services:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "4", "http://127.0.0.1:8080/actuator/health/readiness"]
       interval: 15s
       timeout: 5s
-      start_period: 90s
       retries: 3
+      start_period: 90s
     logging:
       driver: json-file
       options:

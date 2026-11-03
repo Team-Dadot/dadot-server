@@ -37,13 +37,13 @@ import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-/**
- * 네트워크·DB·원본 보관소와 분리된 추출기.
- */
 public final class DartArchiveExtractor {
 
     public static final String VERSION = "dart-markup-v1";
     public static final int MAX_BLOCK = 8192;
+
+    private static final int MAX_TABLE_COLUMNS = 512;
+    private static final int MAX_TABLE_GRID_SLOTS = 2_560_000;
 
     private static final int MAX_TEXT = 8_000_000;
     private static final long MAX_XML = 64L * 1024 * 1024;
@@ -572,7 +572,7 @@ public final class DartArchiveExtractor {
                             ),
                             span(
                                     attributes.getValue("COLSPAN"),
-                                    256
+                                    MAX_TABLE_COLUMNS
                             ),
                             frames.size()
                     );
@@ -919,24 +919,25 @@ public final class DartArchiveExtractor {
             int rows = table.rows.size();
             int width = 0;
 
-            if ((long) rows * 256 > 1_280_000) {
+            if ((long) rows * MAX_TABLE_COLUMNS
+                    > MAX_TABLE_GRID_SLOTS) {
                 throw failure("DART_DOCUMENT_LIMIT");
             }
 
-            Cell[][] grid = new Cell[rows][256];
+            Cell[][] grid = new Cell[rows][MAX_TABLE_COLUMNS];
             int occupied = 0;
 
             for (int r = 0; r < rows; r++) {
                 int column = 0;
 
                 for (var cell : table.rows.get(r)) {
-                    while (column < 256
+                    while (column < MAX_TABLE_COLUMNS
                             && grid[r][column] != null) {
                         column++;
                     }
 
                     if (r + cell.rows > rows
-                            || column + cell.columns > 256) {
+                            || column + cell.columns > MAX_TABLE_COLUMNS) {
                         throw failure("DART_INVALID_TABLE");
                     }
 

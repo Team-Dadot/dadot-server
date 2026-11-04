@@ -85,7 +85,7 @@ public final class QuizGeneration {
 
     public static Validated validate(JsonNode questions, long companyId, Input input, int maximum) {
         if (questions == null || !questions.isArray() || questions.size() > maximum) {
-            throw new Failure("AI_INVALID_OUTPUT", false);
+            throw new Failure("AI_INVALID_OUTPUT", false, 0, null, "QUESTION_ARRAY_OR_COUNT");
         }
         var sources = input.all().stream().collect(java.util.stream.Collectors.toMap(
                 Section::sectionId, s -> s, (a, b) -> a));
@@ -192,12 +192,18 @@ public final class QuizGeneration {
         private final boolean retryable;
         private final long retryAfterSeconds;
         private final Metadata metadata;
+        private final String detailCode;
 
         public Failure(String code, boolean retryable) {
             this(code, retryable, 0, null);
         }
         public Failure(String code, boolean retryable, long retryAfterSeconds, Metadata metadata) {
+            this(code, retryable, retryAfterSeconds, metadata, null);
+        }
+
+        public Failure(String code, boolean retryable, long retryAfterSeconds, Metadata metadata, String detailCode) {
             super(code);
+            this.detailCode = detailCode;
             this.code = code;
             this.retryable = retryable;
             this.retryAfterSeconds = retryAfterSeconds;
@@ -207,5 +213,6 @@ public final class QuizGeneration {
         public boolean retryable() { return retryable; }
         public long retryAfterSeconds() { return retryAfterSeconds; }
         public Metadata metadata() { return metadata; }
+        public String detailCode() { return detailCode; }
     }
 }

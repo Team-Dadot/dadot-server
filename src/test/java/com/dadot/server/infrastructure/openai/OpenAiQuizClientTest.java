@@ -143,6 +143,18 @@ class OpenAiQuizClientTest {
     }
 
     @Test
+    void reportsParsingStageWithoutRetainingTheResponseText() {
+        body = response("completed", Map.of("type", "output_text", "text", "not-json-private-marker"));
+        var malformed = assertThrows(Failure.class, () -> client.generate(lease(client)));
+        assertEquals("AI_INVALID_OUTPUT", malformed.code());
+        assertEquals("JSON_PARSE", malformed.detailCode());
+        assertEquals("req-test", malformed.metadata().requestId());
+        assertFalse(malformed.toString().contains("private-marker"));
+        body = response("completed", Map.of("type", "output_text", "text", "{\"unexpected\":1}"));
+        assertEquals("ROOT_FIELDS", assertThrows(Failure.class, () -> client.generate(lease(client))).detailCode());
+    }
+
+    @Test
     void boundsTheWholeResponseIncludingSlowBody() {
         slowBody = true;
         client = client(Duration.ofMillis(150));

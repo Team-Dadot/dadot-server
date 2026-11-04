@@ -131,33 +131,37 @@ public class OpenAiQuizClient {
                     throw new Failure("AI_INCOMPLETE_OUTPUT", false, 0, metadata);
                 }
                 var output = root.get("output");
-                if (output == null || !output.isArray()) throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata);
+                if (output == null || !output.isArray()) throw invalid(metadata, "OUTPUT_ARRAY");
                 String json = null;
                 for (var item : output) {
                     if (!"message".equals(item.path("type").asText())) continue;
                     var contents = item.path("content");
-                    if (!contents.isArray()) throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata);
+                    if (contents == null || !contents.isArray()) throw invalid(metadata, "MESSAGE_CONTENT_ARRAY");
                     for (var content : contents) {
                         if ("refusal".equals(content.path("type").asText())) {
                             throw new Failure("AI_REFUSED", false, 0, metadata);
                         }
                         if ("output_text".equals(content.path("type").asText())) {
                             if (json != null || !content.path("text").isTextual()) {
-                                throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata);
+                                throw invalid(metadata, "MULTIPLE_OR_NON_TEXT_OUTPUT");
                             }
                             json = content.path("text").asText();
                         }
                     }
                 }
-                if (json == null) throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata);
-                JsonNode value = mapper.reader().with(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                        .readTree(json);
-                QuizGeneration.fields(value, java.util.Set.of("questions"), java.util.Set.of());
+                if (json == null) throw invalid(metadata, "MISSING_OUTPUT_TEXT");
+                JsonNode value;
+                try {
+                    value = mapper.reader().with(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                            .readTree(json);
+                } catch (RuntimeException ex) { throw invalid(metadata, "JSON_PARSE"); }
+                try { QuizGeneration.fields(value, java.util.Set.of("questions"), java.util.Set.of()); }
+                catch (RuntimeException ex) { throw invalid(metadata, "ROOT_FIELDS"); }
                 return new Output(value.get("questions"), metadata);
             } catch (Failure ex) {
                 throw ex;
             } catch (RuntimeException ex) {
-                throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata);
+                throw invalid(metadata, "RESPONSE_PARSE");
             }
         } catch (InterruptedException ex) {
             pending.cancel(true);
@@ -171,6 +175,10 @@ public class OpenAiQuizClient {
             pending.cancel(true);
             throw new Failure("AI_CONNECTION_ERROR", true);
         }
+    }
+
+    private static Failure invalid(Metadata metadata, String detail) {
+        return new Failure("AI_INVALID_OUTPUT", false, 0, metadata, detail);
     }
 
     private long retryAfter(String value) {

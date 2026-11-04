@@ -48,6 +48,17 @@ public class QuizGenerationController {
                 service.result(actor(authentication), taskId)));
     }
 
+    @Operation(summary = "형식 오류로 실패한 퀴즈 생성 작업의 기존 후보를 초안으로 복구 (AI 재호출 없음)")
+    @PostMapping("/v1/admin/quiz-generation-tasks/{taskId}/draft-recovery")
+    public ResponseEntity<ApiResponse<QuizGeneration.Result>> recoverDrafts(
+            Authentication authentication, @PathVariable String taskId,
+            @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query,
+            @RequestBody(required = false) byte[] body) {
+        if (!query.isEmpty() || body != null && body.length != 0) throw QuizBank.invalid();
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiResponse.success(
+                service.recoverDrafts(actor(authentication), taskId)));
+    }
+
     private static SessionAuthenticationToken actor(Authentication authentication) {
         if (authentication instanceof SessionAuthenticationToken token && token.isAuthenticated()) return token;
         throw new BusinessException(ErrorCode.UNAUTHENTICATED);

@@ -19,29 +19,43 @@ public class QuizGenerationDraftRepository {
     private final JsonMapper mapper;
     private final QuizBankRepository bank;
 
-    public int saveDrafts(Lease lease, Instant now) {
+    public boolean hasEnoughCandidates(Lease lease) {
         var existing = new HashSet<String>();
         jdbc.query("select question_text from quiz_question_versions where company_id = ?",
                 (org.springframework.jdbc.core.RowCallbackHandler) rs ->
                         existing.add(QuizGeneration.fingerprint(rs.getString(1))), lease.companyId());
+        var hashes = jdbc.query("select question_hash from quiz_generation_candidates where task_id = ?",
+                (rs, n) -> rs.getString(1), lease.taskId());
+        return hashes.stream().filter(hash -> !existing.contains(hash)).distinct().count() >= lease.questionCount();
+    }
+
+    public int saveDrafts(Lease lease, Instant now) {
+        return saveDrafts(lease.taskId(), lease.companyId(), lease.userId(), lease.questionCount(), now);
+    }
+
+    public int saveDrafts(String taskId, long companyId, long actorId, int requestedCount, Instant now) {
+        var existing = new HashSet<String>();
+        jdbc.query("select question_text from quiz_question_versions where company_id = ?",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs ->
+                        existing.add(QuizGeneration.fingerprint(rs.getString(1))), companyId);
         var candidates = jdbc.query("""
                 select batch_no, candidate_no, question_hash, content_json
                 from quiz_generation_candidates where task_id = ?
                 order by candidate_no, batch_no
-                """, (rs, n) -> new Candidate(rs.getInt(1), rs.getInt(2), rs.getString(3), rs.getString(4)), lease.taskId());
+                """, (rs, n) -> new Candidate(rs.getInt(1), rs.getInt(2), rs.getString(3), rs.getString(4)), taskId);
         int created = 0;
         for (var candidate : candidates) {
-            if (created >= lease.questionCount()) break;
+            if (created >= requestedCount) break;
             if (!existing.add(candidate.hash())) continue;
             var content = QuizBank.Content.parse(mapper.readTree(candidate.json()));
             bank.validateReferences(content);
-            long question = bank.createQuestion(lease.companyId(), now);
-            long version = bank.createVersion(question, content, "AI generated draft; task=" + lease.taskId(), now);
-            bank.audit(lease.userId(), "QUIZ_AI_DRAFT_CREATED", version, null, now);
+            long question = bank.createQuestion(companyId, now);
+            long version = bank.createVersion(question, content, "AI generated draft; task=" + taskId, now);
+            bank.audit(actorId, "QUIZ_AI_DRAFT_CREATED", version, null, now);
             jdbc.update("""
                     update quiz_generation_candidates set selected_question_id = ?, selected_version_id = ?
                     where task_id = ? and batch_no = ? and candidate_no = ?
-                    """, question, version, lease.taskId(), candidate.batch(), candidate.number());
+                    """, question, version, taskId, candidate.batch(), candidate.number());
             created++;
         }
         return created;

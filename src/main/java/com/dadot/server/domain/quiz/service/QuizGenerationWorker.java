@@ -70,9 +70,11 @@ public class QuizGenerationWorker {
             write.executeWithoutResult(tx -> repository.save(lease, checked, metadata, clock.instant()));
         } catch (Failure ex) {
             var failure = ex.metadata() != null || output == null ? ex
-                    : new Failure(ex.code(), ex.retryable(), ex.retryAfterSeconds(), output.metadata());
+                    : new Failure(ex.code(), ex.retryable(), ex.retryAfterSeconds(), output.metadata(), ex.detailCode());
             write.executeWithoutResult(tx -> repository.fail(lease, failure, clock.instant()));
-            log.warn("Quiz generation task={} code={}", lease.taskId(), failure.code());
+            log.warn("Quiz generation task={} batch={} code={} detail={} requestId={}",
+                    lease.taskId(), lease.batchNo(), failure.code(), failure.detailCode(),
+                    failure.metadata() == null ? null : failure.metadata().requestId());
         } catch (BusinessException ex) {
             var failure = new Failure("SOURCE_UNAVAILABLE", false, 0, output == null ? null : output.metadata());
             write.executeWithoutResult(tx -> repository.fail(lease, failure, clock.instant()));

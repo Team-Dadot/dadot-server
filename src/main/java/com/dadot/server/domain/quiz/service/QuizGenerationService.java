@@ -94,6 +94,16 @@ public class QuizGenerationService {
         })));
     }
 
+    public Result recoverDrafts(SessionAuthenticationToken actor, String taskId) {
+        String canonical = QuizGeneration.uuid(taskId);
+        return storage(() -> Objects.requireNonNull(write.execute(tx -> {
+            access.require(actor, true);
+            var result = repository.recoverDrafts(canonical, actor.getPrincipal().userId(), clock.instant());
+            access.require(actor, true);
+            return result;
+        })));
+    }
+
     private static <T> T storage(Supplier<T> work) {
         try { return work.get(); }
         catch (TransientDataAccessException | DataAccessResourceFailureException

@@ -130,6 +130,96 @@ class QuizGenerationIntegrationTest {
     }
 
     @Test
+    void stopsBeforeLaterBadBatchOnceFiveUniqueDraftsAreAvailable() throws Exception {
+        addRecoverySections();
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            if (lease.batchNo() == 2) throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata());
+            return output(lease);
+        }).when(client).generate(any());
+        String task = start(5);
+        var result = drain(task);
+        assertEquals("SUCCEEDED", result.path("status").asText());
+        assertEquals(5, result.path("createdCount").asInt());
+        assertEquals(3, result.path("totalBatches").asInt());
+        assertEquals(2, result.path("processedBatches").asInt());
+        verify(client, times(2)).generate(any());
+    }
+
+    @Test
+    void earlyCompletionExcludesAlreadyExistingCompanyQuestions() throws Exception {
+        addRecoverySections();
+        drain(start(5));
+        String next = start(5);
+        allowClaim(); worker.runOnce();
+        assertEquals("PROCESSING", repository.result(next).status());
+        assertEquals(0, repository.result(next).createdCount());
+        assertEquals(5, count("select count(*) from quiz_questions where company_id=?", company));
+    }
+
+    @Test
+    void recoversExistingFailedCandidatesWithoutAiAndReplayCreatesNoDuplicates() throws Exception {
+        String task = failedRecoveryTask();
+        assertEquals(0, count("select count(*) from quiz_questions where company_id=?", company));
+        int candidates = repository.result(task).candidateCount();
+        assertTrue(candidates > 0);
+        clearInvocations(client);
+        var recovered = json(mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/admin/quiz-generation-tasks/" + task + "/draft-recovery")
+                .header("Authorization", "Bearer " + token)).andExpect(status().isOk())).path("data");
+        assertEquals("FAILED", recovered.path("status").asText());
+        assertEquals("AI_INVALID_OUTPUT", recovered.path("errorCode").asText());
+        assertEquals(Math.min(5, candidates), recovered.path("createdCount").asInt());
+        assertEquals(recovered.path("createdCount").asInt(), recovered.path("questionIds").size());
+        var replay = json(mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/admin/quiz-generation-tasks/" + task + "/draft-recovery")
+                .header("Authorization", "Bearer " + token)).andExpect(status().isOk())).path("data");
+        assertEquals(recovered, replay);
+        assertEquals(recovered.path("createdCount").asInt(), count("select count(*) from quiz_questions where company_id=?", company));
+        assertEquals(0, count("select count(*) from quiz_questions where company_id=? and published_version_no is not null", company));
+        verify(client, never()).generate(any());
+    }
+
+    @Test
+    void recoveryChecksAdminSourceStateAndExistingCompanyJobs() throws Exception {
+        String task = failedRecoveryTask();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/admin/quiz-generation-tasks/" + task + "/draft-recovery")).andExpect(status().isUnauthorized());
+        jdbc.update("update users set role='USER' where id=?", user);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/admin/quiz-generation-tasks/" + task + "/draft-recovery")
+                .header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
+        jdbc.update("update users set role='ADMIN' where id=?", user);
+        String active = start(5);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/admin/quiz-generation-tasks/" + task + "/draft-recovery")
+                .header("Authorization", "Bearer " + token)).andExpect(status().isTooManyRequests());
+        jdbc.update("update ai_tasks set status='CANCELLED' where id=?", active);
+        jdbc.update("update quiz_generation_jobs set active_company_id=null where task_id=?", active);
+        jdbc.update("update disclosure_versions set status='SUSPENDED' where id=?", versions.getFirst());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/admin/quiz-generation-tasks/" + task + "/draft-recovery")
+                .header("Authorization", "Bearer " + token)).andExpect(status().isConflict());
+        assertEquals(0, count("select count(*) from quiz_questions where company_id=?", company));
+    }
+
+    private String failedRecoveryTask() throws Exception {
+        addRecoverySections();
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            if (lease.batchNo() == 1) throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata());
+            return output(lease);
+        }).when(client).generate(any());
+        String task = start(5);
+        allowClaim(); worker.runOnce(); allowClaim(); worker.runOnce();
+        assertEquals("FAILED", repository.result(task).status());
+        return task;
+    }
+
+    private void addRecoverySections() {
+        long version = versions.getFirst();
+        jdbc.batchUpdate("insert into disclosure_sections(disclosure_version_id, company_id, section_key, content_text) values (?, ?, ?, ?)",
+                java.util.stream.IntStream.range(0, 81).boxed().toList(), 100, (statement, i) -> {
+                    statement.setLong(1, version); statement.setLong(2, company);
+                    statement.setString(3, "recovery-block-" + i); statement.setString(4, ORIGINAL);
+                });
+    }
+
+    @Test
     void acceptsUppercaseUuidAndReplaysEvenWhenProviderIsDisabled() throws Exception {
         String id = key();
         String first = json(post(body(3), id.toUpperCase(Locale.ROOT)).andExpect(status().isAccepted())).path("data").path("taskId").asText();
@@ -376,7 +466,7 @@ class QuizGenerationIntegrationTest {
     }
 
     @Test
-    void reachesOneHundredAcrossAllBatchesAndNeverGeneratesDuringUserPlay() throws Exception {
+    void reachesOneHundredEarlyAndNeverGeneratesDuringUserPlay() throws Exception {
         long version = versions.getFirst();
         jdbc.update("delete from disclosure_sections where disclosure_version_id=?", version);
         jdbc.batchUpdate("insert into disclosure_sections(disclosure_version_id, company_id, section_key, content_text) values (?, ?, ?, ?)",
@@ -386,7 +476,8 @@ class QuizGenerationIntegrationTest {
                 });
         var result = drain(start(100));
         assertEquals(100, result.path("createdCount").asInt());
-        assertEquals(result.path("totalBatches").asInt(), result.path("processedBatches").asInt());
+        assertEquals(20, result.path("processedBatches").asInt());
+        assertTrue(result.path("processedBatches").asInt() < result.path("totalBatches").asInt());
         assertEquals(100, count("select count(*) from quiz_questions where company_id=?", company));
         clearInvocations(client);
         jdbc.update("update companies set is_service_company=true where id=?", company);

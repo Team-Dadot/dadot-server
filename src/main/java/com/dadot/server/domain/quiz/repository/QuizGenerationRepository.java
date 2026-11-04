@@ -106,6 +106,35 @@ public class QuizGenerationRepository {
         return rows.getFirst();
     }
 
+    /** Failed task stays FAILED; only its recoverable candidates become new DRAFT questions. */
+    public Result recoverDrafts(String taskId, long actorId, Instant now) {
+        var companies = jdbc.query("select company_id from ai_tasks where id = ? and type = 'QUIZ_GENERATION'",
+                (rs, n) -> rs.getLong(1), taskId);
+        if (companies.isEmpty()) throw QuizBank.missing();
+        long companyId = companies.getFirst();
+        bank.lockCompany(companyId);
+        jdbc.queryForObject("select id from quiz_generation_control where id = 1 for update", Integer.class);
+        var rows = jdbc.query("""
+                select t.status, t.last_error_code, j.requested_count, j.created_count
+                from ai_tasks t join quiz_generation_jobs j on j.task_id = t.id
+                where t.id = ? and t.company_id = ? for update
+                """, (rs, n) -> new Recovery(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getInt(4)), taskId, companyId);
+        if (rows.isEmpty()) throw QuizBank.missing();
+        var state = rows.getFirst();
+        if (!"FAILED".equals(state.status()) || !"AI_INVALID_OUTPUT".equals(state.error())) throw QuizBank.invalid();
+        long selected = count("select count(*) from quiz_generation_candidates where task_id = ? and selected_question_id is not null", taskId);
+        if (selected != state.created()) throw QuizBank.invalid();
+        if (selected > 0) return result(taskId); // task-level idempotency under the company lock
+        if (count("select count(*) from quiz_generation_jobs where active_company_id = ?", companyId) > 0)
+            throw new BusinessException(ErrorCode.RATE_LIMITED);
+        sources.validate(companyId, pinnedSources(taskId));
+        int created = drafts.saveDrafts(taskId, companyId, actorId, state.requested(), now);
+        jdbc.update("update quiz_generation_jobs set created_count = ? where task_id = ?", created, taskId);
+        return result(taskId);
+    }
+
+    private record Recovery(String status, String error, int requested, int created) {}
+
     public Lease claim(Instant now) {
         var next = jdbc.queryForObject("select next_call_at from quiz_generation_control where id = 1 for update", LocalDateTime.class);
         if (Objects.requireNonNull(next).isAfter(utc(now)) || count("""
@@ -185,7 +214,7 @@ public class QuizGenerationRepository {
                 update quiz_generation_jobs set next_batch = next_batch + 1, attempt = 0,
                     rejected_count = rejected_count + ? where task_id = ?
                 """, rejected, lease.taskId());
-        if (lease.batchNo() + 1 == lease.batchCount()) {
+        if (drafts.hasEnoughCandidates(lease) || lease.batchNo() + 1 == lease.batchCount()) {
             int created = drafts.saveDrafts(lease, now);
             finish(lease.taskId(), created, created == 0 ? "NO_VALID_QUESTIONS" : null, now);
         } else {

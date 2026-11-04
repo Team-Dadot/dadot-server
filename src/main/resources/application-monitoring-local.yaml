@@ -1,0 +1,192 @@
+name: dadot-monitoring-local
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: dadot-monitoring-local-app:dev
+
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+    environment:
+      SPRING_PROFILES_ACTIVE: monitoring-local
+
+      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb:3306/dadot_monitoring
+      SPRING_DATASOURCE_USERNAME: dadot_monitor
+      SPRING_DATASOURCE_PASSWORD: local-monitor-only
+
+      # 로컬 테스트 전용 공개 값
+      JWT_SECRET_BASE64: AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=
+      AUTH_PROOF_ENCRYPTION_KEY: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+      AUTH_VERIFICATION_HMAC_SECRET: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+      PRIVACY_POLICY_URL: https://example.invalid/privacy
+      INQUIRY_FORM_URL: https://example.invalid/inquiry
+
+      MAIL_FROM: test@example.invalid
+      SPRING_MAIL_HOST: 127.0.0.1
+      SPRING_MAIL_PORT: "1"
+      SPRING_MAIL_TEST_CONNECTION: "false"
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
+
+      OPENAI_API_KEY: ""
+      DART_API_KEY: ""
+
+      APP_DART_ENABLED: "false"
+      APP_DART_WORKER_ENABLED: "false"
+      APP_DART_ORIGINALS_ENABLED: "false"
+
+      APP_QUIZ_GENERATION_ENABLED: "false"
+      APP_QUIZ_GENERATION_WORKER_ENABLED: "false"
+
+      APP_INTERVIEW_GENERATION_ENABLED: "false"
+      APP_INTERVIEW_GENERATION_WORKER_ENABLED: "false"
+
+      APP_INTERVIEW_EVALUATION_ENABLED: "false"
+      APP_INTERVIEW_EVALUATION_WORKER_ENABLED: "false"
+
+      APP_ACCOUNT_DELETION_WORKER_ENABLED: "false"
+      APP_EMAIL_VERIFICATION_MAINTENANCE_ENABLED: "false"
+
+    ports:
+      - "127.0.0.1:18080:8080"
+
+    networks:
+      - monitoring
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - http://127.0.0.1:8081/actuator/health
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mariadb:
+    image: mariadb:11.8.9
+
+    environment:
+      MARIADB_DATABASE: dadot_monitoring
+      MARIADB_USER: dadot_monitor
+      MARIADB_PASSWORD: local-monitor-only
+      MARIADB_ROOT_PASSWORD: local-monitor-root-only
+      TZ: UTC
+
+    volumes:
+      - monitoring-db-data:/var/lib/mysql
+
+    networks:
+      - monitoring
+
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+
+    healthcheck:
+      test:
+        - CMD
+        - healthcheck.sh
+        - --connect
+        - --innodb_initialized
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  prometheus:
+    image: prom/prometheus:v3.13.5
+
+    depends_on:
+      app:
+        condition: service_healthy
+
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=512MB
+
+    ports:
+      - "127.0.0.1:19090:9090"
+
+    volumes:
+      - type: bind
+        source: ./monitoring/prometheus/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - prometheus-data:/prometheus
+
+    networks:
+      - monitoring
+      - monitoring-ui
+
+  grafana:
+    image: grafana/grafana:13.3.0
+
+    depends_on:
+      prometheus:
+        condition: service_started
+
+    environment:
+      # 로컬 테스트 전용 로그인
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: local-grafana-only
+
+      GF_SERVER_ROOT_URL: http://127.0.0.1:13000/
+
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+
+    ports:
+      - "127.0.0.1:13000:3000"
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - type: bind
+        source: ./monitoring/grafana/provisioning/datasources/prometheus.yaml
+        target: /etc/grafana/provisioning/datasources/prometheus.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+
+    networks:
+      - monitoring-ui
+
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:3000/api/health
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  monitoring-db-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  monitoring:
+    internal: true
+
+  monitoring-ui:
+    driver: bridge

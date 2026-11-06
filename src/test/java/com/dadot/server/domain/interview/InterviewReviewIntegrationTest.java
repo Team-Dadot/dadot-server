@@ -509,7 +509,7 @@ class InterviewReviewIntegrationTest {
     }
 
     @Test
-    void dashboardComparesQuizAndDraftActivityAndDoesNotIgnoreRemainingAnswersToday() throws Exception {
+    void dashboardStopsNewQuestionsAfterThirdButKeepsQuestionRetriesAvailable() throws Exception {
         draft(question, "작성 중인 답변", null).andExpect(status().isOk());
         long set = insert("""
                 insert into quiz_sets(user_id,company_id,business_date,mode,status,created_at)
@@ -522,7 +522,8 @@ class InterviewReviewIntegrationTest {
         for (long q : questionIds) answer(q, 20);
         JsonNode view = dashboard();
         assertEquals(0, view.get("selectedCompany").get("interviewToday").get("questionRemaining").asInt());
-        assertEquals("START_INTERVIEW", view.get("nextLearningAction").asText());
+        assertEquals("REVIEW", view.get("nextLearningAction").asText());
+        assertEquals(6, view.get("selectedCompany").get("interviewToday").get("remaining").asInt());
         for (long q : questionIds) { answer(q, 20); answer(q, 20); }
         assertEquals("REVIEW", dashboard().get("nextLearningAction").asText());
     }

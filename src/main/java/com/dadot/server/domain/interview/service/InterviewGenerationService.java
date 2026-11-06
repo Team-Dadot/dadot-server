@@ -175,11 +175,8 @@ public class InterviewGenerationService {
                     user, companyId, false, true, now
             );
 
-            if (question == null) {
-                question = reads.reusable(
-                        user, companyId, false, false, now
-                );
-            }
+            // 답변한 질문의 재도전은 질문 상세에서 처리한다.
+            // 일반 진입/다음 질문에서는 저장 초안과 미답변 질문만 재사용한다.
 
             if (question != null) {
                 return new Entry(

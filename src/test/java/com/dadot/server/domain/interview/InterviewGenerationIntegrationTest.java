@@ -749,11 +749,89 @@ class InterviewGenerationIntegrationTest {
                 )
                 .andExpect(jsonPath("$.data.usage.canSubmit").value(true));
 
-        entry(null).andExpect(
-                jsonPath("$.data.nextAction").value("ANSWER_QUESTION")
-        );
+        entry(null)
+                .andExpect(jsonPath("$.data.nextAction").value("REVIEW"))
+                .andExpect(jsonPath("$.data.questionId").isEmpty());
 
         error(create(key(), token), 409, "DAILY_LIMIT_EXCEEDED");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void nextQuestionDoesNotReuseAnsweredQuestionWhileRetryRemainsAvailable(int attempts)
+            throws Exception {
+        String task = accepted();
+        worker.runOnce();
+        long previous = question(task);
+        LocalDate day = clock.instant().atZone(InterviewGeneration.KST).toLocalDate();
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            consume(previous, day, 1, attempt, attempt);
+        }
+
+        entry(null)
+                .andExpect(jsonPath("$.data.nextAction").value("GENERATE"))
+                .andExpect(jsonPath("$.data.questionId").isEmpty());
+        detail(previous, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.usage.canSubmit").value(true))
+                .andExpect(jsonPath("$.data.usage.questionRemaining").value(3 - attempts));
+
+        String next = accepted();
+        entry(next)
+                .andExpect(jsonPath("$.data.nextAction").value("WAIT_GENERATION"))
+                .andExpect(jsonPath("$.data.questionId").isEmpty())
+                .andExpect(jsonPath("$.data.generationTask.taskId").value(next));
+        entry(null)
+                .andExpect(jsonPath("$.data.nextAction").value("WAIT_GENERATION"))
+                .andExpect(jsonPath("$.data.questionId").isEmpty());
+
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            Output base = output(lease);
+            return new Output(new Generated("다음 공시 근거로 해외영업 실행 계획을 설명해 주세요.",
+                    base.generated().evidence()), base.metadata());
+        }).when(client).generate(any());
+        gate();
+        worker.runOnce();
+        long following = question(next);
+        assertNotEquals(previous, following);
+        entry(next)
+                .andExpect(jsonPath("$.data.nextAction").value("ANSWER_QUESTION"))
+                .andExpect(jsonPath("$.data.questionId").value(following));
+    }
+
+    @Test
+    void nextQuestionAdvancesAcrossThreeDistinctQuestionsAndThenStops() throws Exception {
+        LocalDate day = clock.instant().atZone(InterviewGeneration.KST).toLocalDate();
+        var questions = new java.util.HashSet<Long>();
+        for (int slot = 1; slot <= 3; slot++) {
+            String task = accepted();
+            doAnswer(invocation -> {
+                Lease lease = invocation.getArgument(0);
+                Output base = output(lease);
+                return new Output(new Generated("공시 근거에 따른 질문 " + lease.taskId(),
+                        base.generated().evidence()), base.metadata());
+            }).when(client).generate(any());
+            gate();
+            worker.runOnce();
+            long current = question(task);
+            assertTrue(questions.add(current));
+            entry(task)
+                    .andExpect(jsonPath("$.data.nextAction").value("ANSWER_QUESTION"))
+                    .andExpect(jsonPath("$.data.questionId").value(current));
+            consume(current, day, slot, slot, 1);
+            entry(null)
+                    .andExpect(jsonPath("$.data.nextAction").value(slot < 3 ? "GENERATE" : "REVIEW"))
+                    .andExpect(jsonPath("$.data.questionId").isEmpty());
+        }
+        assertEquals(3, questions.size());
+        error(create(key(), token), 409, "DAILY_LIMIT_EXCEEDED");
+        for (long question : questions) {
+            detail(question, token)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.usage.canSubmit").value(true))
+                    .andExpect(jsonPath("$.data.usage.questionRemaining").value(2));
+        }
     }
 
     @Test

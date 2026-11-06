@@ -104,8 +104,9 @@ public class InterviewStatisticsRepository {
         if (quizInProgress) return "CONTINUE_QUIZ";
         if (!quiz.completed()) return "START_QUIZ";
         if (today.remaining() == 0) return "REVIEW";
-        if (reads.reusable(user, company, false, true, now) != null
-                || reads.reusable(user, company, false, false, now) != null) return "START_INTERVIEW";
+        // 새 질문 진입은 미답변 질문 또는 남은 질문 슬롯이 있을 때만 안내한다.
+        // 답변한 질문의 남은 재도전은 복습/질문 상세에서 계속 사용할 수 있다.
+        if (reads.reusable(user, company, false, true, now) != null) return "START_INTERVIEW";
         return today.questionRemaining() == 0 ? "REVIEW" : "START_INTERVIEW";
     }
 }

@@ -236,7 +236,7 @@ public final class InterviewGeneration {
     public static Generated validate(JsonNode value, Input input) {
         fields(value, Set.of("question", "evidence"));
 
-        String question = string(value.get("question"), 500);
+        String question = string(value.get("question"), 160);
         JsonNode evidence = value.get("evidence");
 
         if (!evidence.isArray() || evidence.isEmpty() || evidence.size() > 3) {

@@ -4,6 +4,8 @@ import com.dadot.server.domain.interview.model.InterviewGeneration;
 import com.dadot.server.domain.interview.model.InterviewGeneration.*;
 import com.dadot.server.domain.interview.support.InterviewSourcePlanner;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Instant;
@@ -71,6 +73,53 @@ class InterviewGenerationModelTest {
                     )
             );
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 99, 100, 140, 160})
+    void questionLengthAcceptsUpTo160CodePointsWithoutForcingRecommendedMinimum(int length) {
+        String question = "가".repeat(length);
+        assertEquals(question, InterviewGeneration.validate(lengthOutput(question, "근거"),
+                lengthInput("근거")).question());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {161, 500})
+    void questionLongerThan160IsRejectedRatherThanTruncated(int length) {
+        assertThrows(Failure.class, () -> InterviewGeneration.validate(
+                lengthOutput("가".repeat(length), "근거"), lengthInput("근거")));
+    }
+
+    @Test
+    void questionLengthCountsSpacesAndSupplementaryCodePoints() {
+        String question = "가 ".repeat(79) + "🙂?";
+        assertEquals(160, question.codePointCount(0, question.length()));
+        assertEquals(question, InterviewGeneration.validate(lengthOutput(question, "근거"),
+                lengthInput("근거")).question());
+        assertThrows(Failure.class, () -> InterviewGeneration.validate(
+                lengthOutput(question + " ", "근거"), lengthInput("근거")));
+    }
+
+    @Test
+    void evidenceQuoteStillAccepts500AndRejects501Characters() {
+        String quote = "가".repeat(500);
+        assertEquals(quote, InterviewGeneration.validate(lengthOutput("핵심 질문?", quote),
+                lengthInput(quote)).evidence().getFirst().quote());
+        String oversized = quote + "나";
+        assertThrows(Failure.class, () -> InterviewGeneration.validate(
+                lengthOutput("핵심 질문?", oversized), lengthInput(oversized)));
+    }
+
+    private Input lengthInput(String source) {
+        return new Input("회사", new Job(null, "영업", true), List.of(),
+                List.of(new Section(10, 20, "사업", source)), List.of(), List.of());
+    }
+
+    private tools.jackson.databind.JsonNode lengthOutput(String question, String quote) {
+        return mapper.readTree(mapper.writeValueAsString(java.util.Map.of(
+                "question", question,
+                "evidence", List.of(java.util.Map.of(
+                        "disclosureVersionId", 20, "sectionId", 10, "quote", quote)))));
     }
 
     @Test

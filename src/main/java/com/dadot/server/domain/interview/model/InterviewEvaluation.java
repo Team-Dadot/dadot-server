@@ -6,6 +6,7 @@ import tools.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -49,20 +50,31 @@ public final class InterviewEvaluation {
         String summary = text(node.get("summaryFeedback"), 30);
         String overall = text(node.get("overallFeedback"), 300);
         JsonNode scores = node.get("criteria");
-        if (!scores.isArray() || scores.size() != 4) throw invalid();
-        var criteria = new ArrayList<Score>();
-        for (int i = 0; i < 4; i++) {
-            JsonNode score = scores.get(i);
+        if (!scores.isArray() || scores.size() != InterviewPolicy.CODES.size()) throw invalid();
+
+        var criteriaByCode = new HashMap<String, Score>();
+        for (JsonNode score : scores) {
             fields(score, Set.of("criterionCode", "score", "feedback", "reason", "answerQuote"));
             String code = text(score.get("criterionCode"), 50);
-            if (!code.equals(InterviewPolicy.CODES.get(i))) throw invalid();
+            if (!InterviewPolicy.CODES.contains(code) || criteriaByCode.containsKey(code)) throw invalid();
+
             JsonNode value = score.get("score");
             if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0 || value.intValue() > 25) throw invalid();
+
             String quote = text(score.get("answerQuote"), 200);
             if (!input.answer().contains(quote)) throw invalid();
-            criteria.add(new Score(code, value.intValue(), text(score.get("feedback"), 150),
+
+            criteriaByCode.put(code, new Score(code, value.intValue(), text(score.get("feedback"), 150),
                     text(score.get("reason"), 150), quote));
         }
+
+        var criteria = new ArrayList<Score>();
+        for (String code : InterviewPolicy.CODES) {
+            Score score = criteriaByCode.get(code);
+            if (score == null) throw invalid();
+            criteria.add(score);
+        }
+
         var links = new ArrayList<Link>();
         JsonNode related = node.get("relatedMaterials");
         if (!related.isArray() || related.size() > 2) throw invalid();

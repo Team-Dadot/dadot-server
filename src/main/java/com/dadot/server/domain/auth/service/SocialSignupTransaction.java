@@ -38,6 +38,7 @@ public class SocialSignupTransaction {
     private final VerificationCrypto hmac;
     private final VerificationTokenCrypto crypto;
     private final AccessTokenIssuer tokens;
+    private final RefreshTokenService refreshTokens;
     private final JwtDecoder decoder;
     private final SessionJwtAuthenticationConverter authentication;
     private final Clock clock;
@@ -145,12 +146,16 @@ public class SocialSignupTransaction {
                 expiresAt
         );
 
+        var refresh = refreshTokens.issue(userId, sessionId, 0, issuedAt);
+
         var response = new SocialSignupResponse(
                 userId,
                 accessToken,
                 "Bearer",
                 expiresAt,
-                false
+                false,
+                refresh.refreshToken(),
+                refresh.refreshExpiresAt()
         );
 
         repository.consumeAndInvalidateOthers(
@@ -228,6 +233,8 @@ public class SocialSignupTransaction {
                 );
             }
 
+            refreshTokens.requireCachedUsable(response.refreshToken(), response.refreshExpiresAt(),
+                    response.userId(), jwt.getId());
             return new Result(response, null);
 
         } catch (AuthenticationServiceException ex) {

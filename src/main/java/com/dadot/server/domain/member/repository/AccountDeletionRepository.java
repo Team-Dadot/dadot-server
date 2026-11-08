@@ -277,6 +277,8 @@ public class AccountDeletionRepository {
                 user
         );
 
+        jdbc.update("update auth_refresh_families set revoked_at=coalesce(revoked_at,?) where user_id=?",
+                utc(now), user);
         jdbc.update(
                 "delete from user_devices where user_id = ?",
                 user
@@ -653,6 +655,7 @@ public class AccountDeletionRepository {
         }
 
         for (String table : List.of(
+                "auth_refresh_families",
                 "auth_sessions",
                 "auth_identities",
                 "user_agreements"

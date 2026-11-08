@@ -15,6 +15,7 @@ import java.time.Clock;
 public class LogoutTransaction {
 
     private final LogoutRepository repository;
+    private final com.dadot.server.domain.auth.repository.RefreshTokenRepository refreshTokens;
     private final Clock clock;
 
     @Transactional(
@@ -63,6 +64,7 @@ public class LogoutTransaction {
             );
         }
 
+        refreshTokens.revokeForSession(userId, sessionId, now);
         repository.detachDevices(userId, sessionId);
     }
 }

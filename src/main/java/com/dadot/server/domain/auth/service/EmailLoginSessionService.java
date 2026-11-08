@@ -21,6 +21,7 @@ public class EmailLoginSessionService {
 
     private final EmailLoginRepository repository;
     private final AccessTokenIssuer tokens;
+    private final RefreshTokenService refreshTokens;
     private final Clock clock;
 
     @Transactional(
@@ -60,9 +61,11 @@ public class EmailLoginSessionService {
                 issuedAt, expiresAt
         );
 
+        var refresh = refreshTokens.issue(verified.userId(), sessionId, account.authVersion(), issuedAt);
+
         return new EmailLoginResponse(
                 verified.userId(), accessToken, "Bearer", expiresAt,
-                account.onboardingCompleted()
+                account.onboardingCompleted(), refresh.refreshToken(), refresh.refreshExpiresAt()
         );
     }
 }

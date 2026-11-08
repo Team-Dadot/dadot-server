@@ -37,6 +37,7 @@ public class EmailSignupTransaction {
     private final VerificationTokenCrypto crypto;
     private final PasswordEncoder passwords;
     private final AccessTokenIssuer tokens;
+    private final RefreshTokenService refreshTokens;
     private final JwtDecoder decoder;
     private final SessionJwtAuthenticationConverter authentication;
     private final Clock clock;
@@ -176,12 +177,16 @@ public class EmailSignupTransaction {
                 expiresAt
         );
 
+        var refresh = refreshTokens.issue(userId, sessionId, 0, issuedAt);
+
         var response = new EmailSignupResponse(
                 userId,
                 accessToken,
                 "Bearer",
                 expiresAt,
-                false
+                false,
+                refresh.refreshToken(),
+                refresh.refreshExpiresAt()
         );
 
         repository.consume(
@@ -263,6 +268,8 @@ public class EmailSignupTransaction {
                 );
             }
 
+            refreshTokens.requireCachedUsable(response.refreshToken(), response.refreshExpiresAt(),
+                    response.userId(), jwt.getId());
             return new Result(response, null);
 
         } catch (AuthenticationServiceException ex) {

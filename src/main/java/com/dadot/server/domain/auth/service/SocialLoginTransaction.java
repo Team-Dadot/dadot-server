@@ -43,6 +43,7 @@ public class SocialLoginTransaction {
     private final VerificationCrypto hmac;
     private final VerificationTokenCrypto crypto;
     private final AccessTokenIssuer tokens;
+    private final RefreshTokenService refreshTokens;
     private final JwtDecoder decoder;
     private final SessionJwtAuthenticationConverter authentication;
     private final Clock clock;
@@ -127,6 +128,7 @@ public class SocialLoginTransaction {
                     expiresAt
             );
 
+            var refresh = refreshTokens.issue(userId, sessionId, account.authVersion(), now);
             response = SocialLoginResponse.login(
                     userId,
                     tokens.issue(
@@ -137,7 +139,9 @@ public class SocialLoginTransaction {
                             expiresAt
                     ),
                     expiresAt,
-                    account.onboarded()
+                    account.onboarded(),
+                    refresh.refreshToken(),
+                    refresh.refreshExpiresAt()
             );
 
         } else {
@@ -227,6 +231,9 @@ public class SocialLoginTransaction {
                         .equals(jwt.getExpiresAt())) {
                     throw invalid();
                 }
+
+                refreshTokens.requireCachedUsable(response.refreshToken(), response.refreshExpiresAt(),
+                        response.userId(), jwt.getId());
 
             } catch (
                     JwtException

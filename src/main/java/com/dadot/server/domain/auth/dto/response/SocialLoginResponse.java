@@ -13,12 +13,20 @@ public record SocialLoginResponse(
         Instant expiresAt,
         Boolean onboardingCompleted,
         String registrationToken,
-        Instant registrationExpiresAt
+        Instant registrationExpiresAt,
+        String refreshToken,
+        Instant refreshExpiresAt
 ) {
 
     public enum Status {
         LOGIN_COMPLETED,
         SIGN_UP_REQUIRED
+    }
+
+    public SocialLoginResponse(Status status, Long userId, String accessToken, String tokenType,
+            Instant expiresAt, Boolean onboardingCompleted, String registrationToken, Instant registrationExpiresAt) {
+        this(status, userId, accessToken, tokenType, expiresAt, onboardingCompleted,
+                registrationToken, registrationExpiresAt, null, null);
     }
 
     public SocialLoginResponse {
@@ -41,7 +49,8 @@ public record SocialLoginResponse(
                 && onboardingCompleted == null
                 && registrationToken != null
                 && !registrationToken.isBlank()
-                && registrationExpiresAt != null;
+                && registrationExpiresAt != null
+                && refreshToken == null && refreshExpiresAt == null;
 
         if (!login && !signup) {
             throw new IllegalArgumentException(
@@ -66,6 +75,12 @@ public record SocialLoginResponse(
                 null,
                 null
         );
+    }
+
+    public static SocialLoginResponse login(long userId, String token, Instant expiresAt,
+            boolean onboarded, String refreshToken, Instant refreshExpiresAt) {
+        return new SocialLoginResponse(Status.LOGIN_COMPLETED, userId, token, "Bearer", expiresAt,
+                onboarded, null, null, refreshToken, refreshExpiresAt);
     }
 
     public static SocialLoginResponse signup(

@@ -355,6 +355,8 @@ public class PasswordResetRepository {
                 userId
         );
 
+        jdbc.update("update auth_refresh_families set revoked_at=coalesce(revoked_at,?) where user_id=?",
+                utc(now), userId);
         jdbc.update(
                 "delete from user_devices where user_id = ?",
                 userId

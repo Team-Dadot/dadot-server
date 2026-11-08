@@ -24,6 +24,7 @@ public class PasswordChangeRepository {
     public static final String OPERATION = "PATCH /v1/users/me/password";
 
     private final JdbcTemplate jdbc;
+    private final RefreshTokenRepository refreshTokens;
     private final VerificationCrypto hmac;
 
     public RequestKey key(PasswordChangeRequest request, String key,
@@ -171,20 +172,10 @@ public class PasswordChangeRepository {
                 utc(now), proof.userId(), proof.email());
     }
 
-    public void revokeOtherSessions(long userId, String currentSession,
-                                    Instant now) {
-        // auth_version을 올리면 현재 JWT까지 무효화되므로 변경하지 않는다.
-        jdbc.update("""
-                update auth_sessions set revoked_at = ?
-                where user_id = ? and id <> ? and revoked_at is null
-                """,
-                utc(now), userId, currentSession);
-
-        jdbc.update("""
-                delete from user_devices
-                where user_id = ? and session_id <> ?
-                """,
-                userId, currentSession);
+    public void revokeOtherSessions(long userId, String currentSession, Instant now) {
+        // Preserve the current logical login (including its rotated access sessions).
+        // All other devices/families are revoked under the already-held user lock.
+        refreshTokens.revokeOtherSessions(userId, currentSession, now);
     }
 
     public void complete(RequestKey key, long userId, Instant now) {

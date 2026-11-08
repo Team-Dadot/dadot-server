@@ -7,8 +7,16 @@ public record EmailLoginResponse(
         String accessToken,
         String tokenType,
         Instant expiresAt,
-        boolean onboardingCompleted
+        boolean onboardingCompleted,
+        String refreshToken,
+        Instant refreshExpiresAt
 ) {
+
+    // Legacy cached responses and existing Java callers may not have refresh fields yet.
+    public EmailLoginResponse(long userId, String accessToken, String tokenType,
+            Instant expiresAt, boolean onboardingCompleted) {
+        this(userId, accessToken, tokenType, expiresAt, onboardingCompleted, null, null);
+    }
     @Override
     public String toString() {
         return "EmailLoginResponse[userId="

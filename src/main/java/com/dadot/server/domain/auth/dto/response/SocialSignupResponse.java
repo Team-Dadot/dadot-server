@@ -7,8 +7,16 @@ public record SocialSignupResponse(
         String accessToken,
         String tokenType,
         Instant expiresAt,
-        boolean onboardingCompleted
+        boolean onboardingCompleted,
+        String refreshToken,
+        Instant refreshExpiresAt
 ) {
+
+    // Legacy cached responses and existing Java callers may not have refresh fields yet.
+    public SocialSignupResponse(long userId, String accessToken, String tokenType,
+            Instant expiresAt, boolean onboardingCompleted) {
+        this(userId, accessToken, tokenType, expiresAt, onboardingCompleted, null, null);
+    }
 
     public SocialSignupResponse {
         if (userId <= 0

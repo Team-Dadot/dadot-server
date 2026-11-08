@@ -56,6 +56,12 @@ public class SecurityConfig {
                 )
 
                 .oauth2ResourceServer(resource -> resource
+                        .bearerTokenResolver(request -> {
+                            if ("POST".equals(request.getMethod())
+                                    && (request.getContextPath() + "/v1/auth/refresh").equals(request.getRequestURI())) return null;
+                            return new org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver()
+                                    .resolve(request);
+                        })
                         .jwt(jwt ->
                                 jwt.jwtAuthenticationConverter(
                                         jwtAuthentication
@@ -88,6 +94,7 @@ public class SecurityConfig {
                                     "/v1/auth/email-verifications/*/verify",
                                     "/v1/auth/signup",
                                     "/v1/auth/login",
+                                    "/v1/auth/refresh",
                                     "/v1/auth/social/*",
                                     "/v1/auth/social/apple/challenges",
                                     "/v1/auth/password/reset"

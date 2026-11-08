@@ -76,24 +76,24 @@ class InterviewGenerationModelTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 99, 100, 140, 160})
-    void questionLengthAcceptsUpTo160CodePointsWithoutForcingRecommendedMinimum(int length) {
+    @ValueSource(ints = {1, 49, 50, 80, 99, 100})
+    void questionLengthAcceptsUpTo100CodePointsWithoutForcingRecommendedMinimum(int length) {
         String question = "가".repeat(length);
         assertEquals(question, InterviewGeneration.validate(lengthOutput(question, "근거"),
                 lengthInput("근거")).question());
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {161, 500})
-    void questionLongerThan160IsRejectedRatherThanTruncated(int length) {
+    @ValueSource(ints = {101, 140, 160, 500})
+    void questionLongerThan100IsRejectedRatherThanTruncated(int length) {
         assertThrows(Failure.class, () -> InterviewGeneration.validate(
                 lengthOutput("가".repeat(length), "근거"), lengthInput("근거")));
     }
 
     @Test
     void questionLengthCountsSpacesAndSupplementaryCodePoints() {
-        String question = "가 ".repeat(79) + "🙂?";
-        assertEquals(160, question.codePointCount(0, question.length()));
+        String question = "가 ".repeat(49) + "🙂?";
+        assertEquals(100, question.codePointCount(0, question.length()));
         assertEquals(question, InterviewGeneration.validate(lengthOutput(question, "근거"),
                 lengthInput("근거")).question());
         assertThrows(Failure.class, () -> InterviewGeneration.validate(

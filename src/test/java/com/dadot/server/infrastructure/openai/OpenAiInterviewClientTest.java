@@ -114,18 +114,19 @@ class OpenAiInterviewClientTest {
         assertFalse(request.get().toString().contains("test-key"));
         assertEquals("gpt-6-luna", request.get().path("model").asText());
         JsonNode schema = request.get().path("text").path("format").path("schema");
-        assertEquals(160, schema.path("properties").path("question").path("maxLength").asInt());
+        assertEquals(100, schema.path("properties").path("question").path("maxLength").asInt());
         assertEquals(500, schema.path("properties").path("evidence").path("items")
                 .path("properties").path("quote").path("maxLength").asInt());
         String instructions = request.get().path("instructions").asText();
-        assertTrue(instructions.contains("100~140자"));
-        assertTrue(instructions.contains("최대 160자"));
+        assertTrue(instructions.contains("50~80자"));
+        assertTrue(instructions.contains("최대 100자"));
     }
 
-    @Test
-    void providerOutputOver160CharactersFailsValidation() {
+    @ParameterizedTest
+    @ValueSource(ints = {101, 160, 500})
+    void providerOutputOver100CharactersFailsValidation(int length) {
         body = response("completed", Map.of("type", "output_text", "text",
-                mapper.writeValueAsString(Map.of("question", "가".repeat(161),
+                mapper.writeValueAsString(Map.of("question", "가".repeat(length),
                         "evidence", List.of(Map.of("disclosureVersionId", 2,
                                 "sectionId", 1, "quote", "해외 판매"))))));
         assertEquals("QUESTION_GENERATION_FAILED", assertThrows(Failure.class,

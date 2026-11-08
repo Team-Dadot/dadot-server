@@ -1,5 +1,7 @@
 package com.dadot.server.domain.auth.dto.request;
 
+import com.dadot.server.domain.auth.support.PasswordPolicy;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.*;
 
 import java.util.ArrayList;
@@ -15,9 +17,12 @@ public record EmailSignupRequest(
         String email,
 
         @NotBlank
-        @Size(min = 8, max = 64)
-        @Pattern(
-                regexp = "^(?=.*[A-Za-z])(?=.*[0-9])[^\\s\\p{Z}\\p{C}]+$"
+        @Size(min = PasswordPolicy.MIN_LENGTH, max = PasswordPolicy.MAX_LENGTH)
+        @Pattern(regexp = PasswordPolicy.PATTERN)
+        @Schema(
+                description = PasswordPolicy.DESCRIPTION,
+                example = "Example123!",
+                format = "password"
         )
         String password,
 

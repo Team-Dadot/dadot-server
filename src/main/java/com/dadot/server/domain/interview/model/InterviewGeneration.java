@@ -267,6 +267,18 @@ public final class InterviewGeneration {
         return new Generated(question, List.copyOf(checked));
     }
 
+    // AI의 새 생성 결과에만 적용한다. 저장된 과거 질문을 조회할 때는 재검사하지 않는다.
+    public static Generated validateComplete(JsonNode value, Input input) {
+        Generated generated = validate(value, input);
+        String question = generated.question();
+
+        if (!question.endsWith("습니까?") && !question.endsWith("주세요.")) {
+            throw new Failure("QUESTION_INCOMPLETE", false);
+        }
+
+        return generated;
+    }
+
     public static String fingerprint(String question) {
         return sha256(
                 Normalizer.normalize(question, Normalizer.Form.NFC)

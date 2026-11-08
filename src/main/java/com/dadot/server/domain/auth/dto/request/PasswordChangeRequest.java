@@ -1,6 +1,7 @@
 package com.dadot.server.domain.auth.dto.request;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.dadot.server.domain.auth.support.PasswordPolicy;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -15,13 +16,12 @@ public record PasswordChangeRequest(
         String verificationToken,
 
         @NotBlank
-        @Size(min = 8, max = 64)
-        @Pattern(
-                regexp = "\\A(?=.*[A-Za-z])(?=.*[0-9])[^\\s\\p{Z}\\p{C}]+\\z"
-        )
+        @Size(min = PasswordPolicy.MIN_LENGTH, max = PasswordPolicy.MAX_LENGTH)
+        @Pattern(regexp = PasswordPolicy.PATTERN)
         @Schema(
-                description = "8~64자, 영문·숫자 포함, 공백 금지",
-                example = "ExampleNew123!"
+                description = PasswordPolicy.DESCRIPTION,
+                example = "ExampleNew123!",
+                format = "password"
         )
         String newPassword
 ) {

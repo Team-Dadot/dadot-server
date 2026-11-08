@@ -19,6 +19,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,10 +30,16 @@ import static org.junit.jupiter.api.Assertions.*;
 class OpenAiInterviewClientTest {
     private final JsonMapper mapper = new JsonMapper();
     private final AtomicReference<JsonNode> request = new AtomicReference<>();
+    private final AtomicInteger requestCount = new AtomicInteger();
+    private final List<JsonNode> requests = new CopyOnWriteArrayList<>();
+    private final List<String> clientIds = new CopyOnWriteArrayList<>();
+    private final Queue<StubResponse> responses = new ConcurrentLinkedQueue<>();
     private HttpServer server;
     private OpenAiInterviewClient client;
     private String body;
     private int status;
+
+    private record StubResponse(int status, String body) {}
 
     @BeforeEach
     void setup() throws Exception {
@@ -61,14 +71,19 @@ class OpenAiInterviewClientTest {
             request.set(
                     mapper.readTree(exchange.getRequestBody().readAllBytes())
             );
+            requestCount.incrementAndGet();
+            requests.add(request.get());
+            clientIds.add(exchange.getRequestHeaders().getFirst("X-Client-Request-Id"));
+            StubResponse planned = responses.poll();
+            if (planned == null) planned = new StubResponse(status, body);
 
             exchange.getResponseHeaders().add("Retry-After", "120");
             exchange.getResponseHeaders().add(
                     "x-request-id", "test-request"
             );
 
-            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(status, bytes.length);
+            byte[] bytes = planned.body().getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(planned.status(), bytes.length);
 
             try (var output = exchange.getResponseBody()) {
                 output.write(bytes);
@@ -120,6 +135,9 @@ class OpenAiInterviewClientTest {
         String instructions = request.get().path("instructions").asText();
         assertTrue(instructions.contains("50~80자"));
         assertTrue(instructions.contains("최대 100자"));
+        assertTrue(instructions.contains("문장 끝을 자르지 않는다"));
+        assertTrue(instructions.contains("하시겠습니까?"));
+        assertEquals(1, requestCount.get());
     }
 
     @ParameterizedTest
@@ -131,6 +149,71 @@ class OpenAiInterviewClientTest {
                                 "sectionId", 1, "quote", "해외 판매"))))));
         assertEquals("QUESTION_GENERATION_FAILED", assertThrows(Failure.class,
                 () -> client.generate(lease())).code());
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void incompleteQuestionIsRegeneratedOnceWithSeparateRequestId() {
+        responses.add(new StubResponse(200, questionResponse("어떤 점을 우선하겠")));
+
+        Output output = client.generate(lease());
+
+        assertEquals("해외영업 전략을 설명해 주세요.", output.generated().question());
+        assertEquals(2, requestCount.get());
+        assertNotEquals(clientIds.get(0), clientIds.get(1));
+        assertFalse(requests.get(0).path("instructions").asText().contains("재생성 규칙:"));
+        assertTrue(requests.get(1).path("instructions").asText().contains("재생성 규칙:"));
+        assertEquals(requests.get(0).path("input"), requests.get(1).path("input"));
+        assertEquals(60, output.metadata().inputTokens());
+        assertEquals(40, output.metadata().outputTokens());
+    }
+
+    @Test
+    void repeatedIncompleteQuestionFailsWithoutFurtherWorkerRetry() {
+        body = questionResponse("어떤 점을 우선하겠?");
+
+        Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
+
+        assertEquals("QUESTION_INCOMPLETE", failure.code());
+        assertFalse(failure.retryable());
+        assertEquals(2, requestCount.get());
+        assertEquals(60, failure.metadata().inputTokens());
+        assertEquals(40, failure.metadata().outputTokens());
+    }
+
+    @Test
+    void temporaryErrorDuringRegenerationDoesNotStartAnotherWorkerRun() {
+        responses.add(new StubResponse(200, questionResponse("어떤 점을 우선하겠")));
+        responses.add(new StubResponse(503, "{}"));
+
+        Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
+
+        assertEquals("AI_HTTP_503", failure.code());
+        assertFalse(failure.retryable());
+        assertEquals(2, requestCount.get());
+        assertNull(failure.metadata().inputTokens());
+    }
+
+    @Test
+    void invalidCitationIsNotRegeneratedEvenWhenQuestionIsIncomplete() {
+        body = questionResponse("어떤 점을 우선하겠").replace("해외 판매", "없는 근거");
+
+        Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
+
+        assertEquals("QUESTION_GENERATION_FAILED", failure.code());
+        assertFalse(failure.retryable());
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void incompleteProviderEnvelopeIsNotRegenerated() {
+        body = response("incomplete", Map.of("type", "output_text", "text", "{}"));
+
+        Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
+
+        assertEquals("AI_INCOMPLETE_OUTPUT", failure.code());
+        assertFalse(failure.retryable());
+        assertEquals(1, requestCount.get());
     }
 
     @ParameterizedTest
@@ -144,6 +227,7 @@ class OpenAiInterviewClientTest {
 
         assertTrue(failure.retryable());
         assertEquals(60, failure.retryAfter());
+        assertEquals(1, requestCount.get());
     }
 
     @ParameterizedTest
@@ -220,6 +304,13 @@ class OpenAiInterviewClientTest {
                 1, 1, 1, "gpt-6-luna",
                 client.policyHash("지침"), "지침", input
         );
+    }
+
+    private String questionResponse(String question) {
+        return response("completed", Map.of("type", "output_text", "text",
+                mapper.writeValueAsString(Map.of("question", question,
+                        "evidence", List.of(Map.of("disclosureVersionId", 2,
+                                "sectionId", 1, "quote", "해외 판매"))))));
     }
 
     private String response(String state, Map<String, String> content) {

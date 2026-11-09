@@ -32,7 +32,6 @@ import java.util.concurrent.TimeoutException;
 @Component
 public class OpenAiInterviewClient {
     private static final int RESPONSE_LIMIT = 256 * 1024;
-    private static final int MAX_GENERATION_CALLS = 2;
 
     private static final String INSTRUCTIONS = """
             한국어 실전 면접 질문을 정확히 1개 작성한다. 기업 공시와 지원 직무를 연결한다.
@@ -49,21 +48,13 @@ public class OpenAiInterviewClient {
             질문 전체를 1~2문장으로 작성하고 한 가지 핵심 질문만 묻는다.
             질문은 반드시 완결된 문장으로 끝낸다. 글자 수를 맞추려고 단어나 문장 끝을 자르지 않는다.
             100자를 넘길 경우 배경 설명을 줄이고 질문 전체를 다시 작성한다.
-            마지막 문장은 '하시겠습니까?' 또는 '말씀해 주세요.'로 끝낸다.
+            문장 끝 표현은 자연스럽게 작성하며 특정 어미나 표현으로 제한하지 않는다.
             화면에 함께 제공되는 공시 근거의 설명을 반복하지 않고 답변에 필요한 최소 맥락만 포함한다.
             긴 공시 설명, 세부 수치와 조치 내역을 질문에 나열하지 않는다.
             간결하게 쓰더라도 대상 기업·사안·직무와 사실의 의미를 바꾸거나 필요한 맥락을 생략하지 않는다.
             evidence 1~3개를 반환한다. 전달된 절의 연속 원문을 공백까지 그대로 최대 500자 인용한다.
             disclosureVersionId와 sectionId는 입력값만 사용한다. 기간 비교를 묻는다면 양쪽 근거를 포함한다.
             출력은 question과 evidence만 포함한다. 정답·예시 답변·점수·개인 원문 해설을 생성하지 않는다.
-            """;
-
-    private static final String REGENERATION_INSTRUCTIONS = """
-            직전 생성 결과는 문장이 완성되지 않아 서버 검증에서 거부됐다.
-            같은 입력 근거로 새로운 질문 전체와 evidence를 다시 작성한다.
-            배경 설명을 최소화하고 공백 포함 50~80자, 최대 100자 안에서 질문을 완성한다.
-            마지막 문장은 반드시 '하시겠습니까?' 또는 '말씀해 주세요.'로 끝낸다.
-            잘린 문장에 문장부호만 붙이거나 단어를 잘라 길이를 맞추지 않는다.
             """;
 
     private final JsonMapper mapper;
@@ -117,20 +108,14 @@ public class OpenAiInterviewClient {
         return InterviewGeneration.sha256(
                 InterviewGeneration.PROMPT_VERSION
                         + INSTRUCTIONS + rules
-                        + REGENERATION_INSTRUCTIONS
-                        + "schema-v1:q100:complete-v1:quote500:low:4096:regenerate1"
+                        + "schema-v1:q100:free-ending-v1:quote500:low:4096"
         );
     }
 
     // 접수 시에도 실제 요청 크기를 검사하며 초과 입력을 자르지 않는다.
     public byte[] encode(String model, String rules, Input input) {
-        return encode(model, rules, input, false);
-    }
-
-    private byte[] encode(String model, String rules, Input input, boolean regenerate) {
         String instructions = "관리자 생성 지침:\n" + rules
-                + "\n서버 필수 규칙:\n" + INSTRUCTIONS
-                + (regenerate ? "\n재생성 규칙:\n" + REGENERATION_INSTRUCTIONS : "");
+                + "\n서버 필수 규칙:\n" + INSTRUCTIONS;
 
         var body = Map.of(
                 "model", model,
@@ -166,38 +151,10 @@ public class OpenAiInterviewClient {
             throw new Failure("AI_POLICY_CHANGED", false);
         }
 
-        Metadata previous = null;
-
-        for (int call = 0; call < MAX_GENERATION_CALLS; call++) {
-            try {
-                Output output = generateOnce(lease, call);
-                return call == 0
-                        ? output
-                        : new Output(output.generated(), combine(previous, output.metadata()));
-            } catch (Failure ex) {
-                if (call == 0 && "QUESTION_INCOMPLETE".equals(ex.code())) {
-                    previous = ex.metadata();
-                    continue;
-                }
-
-                // 문장 보완 호출 이후에는 워커의 추가 재시도를 막아 호출 수를 제한한다.
-                if (call > 0) {
-                    throw new Failure(ex.code(), false, ex.retryAfter(),
-                            combine(previous, ex.metadata()));
-                }
-
-                throw ex;
-            }
-        }
-
-        throw new Failure("QUESTION_INCOMPLETE", false);
-    }
-
-    private Output generateOnce(Lease lease, int call) {
-        byte[] bytes = encode(lease.model(), lease.rules(), lease.input(), call > 0);
+        byte[] bytes = encode(lease.model(), lease.rules(), lease.input());
 
         String clientId = UUID.nameUUIDFromBytes(
-                (lease.taskId() + ":" + lease.runId() + ":" + call)
+                (lease.taskId() + ":" + lease.runId())
                         .getBytes(StandardCharsets.UTF_8)
         ).toString();
 
@@ -326,7 +283,7 @@ public class OpenAiInterviewClient {
                         .readTree(json);
 
                 return new Output(
-                        InterviewGeneration.validateComplete(value, lease.input()),
+                        InterviewGeneration.validate(value, lease.input()),
                         metadata
                 );
             } catch (Failure ex) {
@@ -348,23 +305,6 @@ public class OpenAiInterviewClient {
             pending.cancel(true);
             throw new Failure("AI_CONNECTION_ERROR", true);
         }
-    }
-
-    private static Metadata combine(Metadata first, Metadata last) {
-        if (first == null) return last;
-        if (last == null) {
-            return new Metadata(first.requestId(), first.model(), null, null);
-        }
-
-        return new Metadata(last.requestId(), last.model(),
-                sum(first.inputTokens(), last.inputTokens()),
-                sum(first.outputTokens(), last.outputTokens()));
-    }
-
-    private static Integer sum(Integer first, Integer last) {
-        if (first == null || last == null) return null;
-        long total = (long) first + last;
-        return total <= Integer.MAX_VALUE ? (int) total : null;
     }
 
     private long retryAfter(String value) {

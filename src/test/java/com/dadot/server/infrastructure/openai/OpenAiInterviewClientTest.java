@@ -19,9 +19,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -31,15 +28,10 @@ class OpenAiInterviewClientTest {
     private final JsonMapper mapper = new JsonMapper();
     private final AtomicReference<JsonNode> request = new AtomicReference<>();
     private final AtomicInteger requestCount = new AtomicInteger();
-    private final List<JsonNode> requests = new CopyOnWriteArrayList<>();
-    private final List<String> clientIds = new CopyOnWriteArrayList<>();
-    private final Queue<StubResponse> responses = new ConcurrentLinkedQueue<>();
     private HttpServer server;
     private OpenAiInterviewClient client;
     private String body;
     private int status;
-
-    private record StubResponse(int status, String body) {}
 
     @BeforeEach
     void setup() throws Exception {
@@ -72,18 +64,14 @@ class OpenAiInterviewClientTest {
                     mapper.readTree(exchange.getRequestBody().readAllBytes())
             );
             requestCount.incrementAndGet();
-            requests.add(request.get());
-            clientIds.add(exchange.getRequestHeaders().getFirst("X-Client-Request-Id"));
-            StubResponse planned = responses.poll();
-            if (planned == null) planned = new StubResponse(status, body);
 
             exchange.getResponseHeaders().add("Retry-After", "120");
             exchange.getResponseHeaders().add(
                     "x-request-id", "test-request"
             );
 
-            byte[] bytes = planned.body().getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(planned.status(), bytes.length);
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(status, bytes.length);
 
             try (var output = exchange.getResponseBody()) {
                 output.write(bytes);
@@ -128,15 +116,19 @@ class OpenAiInterviewClientTest {
         );
         assertFalse(request.get().toString().contains("test-key"));
         assertEquals("gpt-6-luna", request.get().path("model").asText());
+
         JsonNode schema = request.get().path("text").path("format").path("schema");
         assertEquals(100, schema.path("properties").path("question").path("maxLength").asInt());
         assertEquals(500, schema.path("properties").path("evidence").path("items")
                 .path("properties").path("quote").path("maxLength").asInt());
+
         String instructions = request.get().path("instructions").asText();
         assertTrue(instructions.contains("50~80자"));
         assertTrue(instructions.contains("최대 100자"));
         assertTrue(instructions.contains("문장 끝을 자르지 않는다"));
-        assertTrue(instructions.contains("하시겠습니까?"));
+        assertTrue(instructions.contains("특정 어미나 표현으로 제한하지 않는다"));
+        assertFalse(instructions.contains("마지막 문장은"));
+        assertFalse(instructions.contains("재생성 규칙:"));
         assertEquals(1, requestCount.get());
     }
 
@@ -147,56 +139,35 @@ class OpenAiInterviewClientTest {
                 mapper.writeValueAsString(Map.of("question", "가".repeat(length),
                         "evidence", List.of(Map.of("disclosureVersionId", 2,
                                 "sectionId", 1, "quote", "해외 판매"))))));
+
         assertEquals("QUESTION_GENERATION_FAILED", assertThrows(Failure.class,
                 () -> client.generate(lease())).code());
         assertEquals(1, requestCount.get());
     }
 
-    @Test
-    void incompleteQuestionIsRegeneratedOnceWithSeparateRequestId() {
-        responses.add(new StubResponse(200, questionResponse("어떤 점을 우선하겠")));
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "어떤 전략이 필요할까요?",
+            "공급 지연에 어떻게 대응하나요?",
+            "비용과 품질 중 무엇을 우선할 것인가요?",
+            "품질과 납기를 함께 개선할 방안을 설명해 보세요.",
+            "인재 확보 방안을 제안해 보십시오.",
+            "어떤 점을 우선하겠"
+    })
+    void acceptsDifferentEndingsWithoutRegeneration(String question) {
+        body = questionResponse(question);
 
         Output output = client.generate(lease());
 
-        assertEquals("해외영업 전략을 설명해 주세요.", output.generated().question());
-        assertEquals(2, requestCount.get());
-        assertNotEquals(clientIds.get(0), clientIds.get(1));
-        assertFalse(requests.get(0).path("instructions").asText().contains("재생성 규칙:"));
-        assertTrue(requests.get(1).path("instructions").asText().contains("재생성 규칙:"));
-        assertEquals(requests.get(0).path("input"), requests.get(1).path("input"));
-        assertEquals(60, output.metadata().inputTokens());
-        assertEquals(40, output.metadata().outputTokens());
+        assertEquals(question, output.generated().question());
+        assertEquals(1, requestCount.get());
+        assertEquals(30, output.metadata().inputTokens());
+        assertEquals(20, output.metadata().outputTokens());
     }
 
     @Test
-    void repeatedIncompleteQuestionFailsWithoutFurtherWorkerRetry() {
-        body = questionResponse("어떤 점을 우선하겠?");
-
-        Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
-
-        assertEquals("QUESTION_INCOMPLETE", failure.code());
-        assertFalse(failure.retryable());
-        assertEquals(2, requestCount.get());
-        assertEquals(60, failure.metadata().inputTokens());
-        assertEquals(40, failure.metadata().outputTokens());
-    }
-
-    @Test
-    void temporaryErrorDuringRegenerationDoesNotStartAnotherWorkerRun() {
-        responses.add(new StubResponse(200, questionResponse("어떤 점을 우선하겠")));
-        responses.add(new StubResponse(503, "{}"));
-
-        Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
-
-        assertEquals("AI_HTTP_503", failure.code());
-        assertFalse(failure.retryable());
-        assertEquals(2, requestCount.get());
-        assertNull(failure.metadata().inputTokens());
-    }
-
-    @Test
-    void invalidCitationIsNotRegeneratedEvenWhenQuestionIsIncomplete() {
-        body = questionResponse("어떤 점을 우선하겠").replace("해외 판매", "없는 근거");
+    void invalidCitationStillFailsRegardlessOfQuestionEnding() {
+        body = questionResponse("어떤 전략이 필요할까요?").replace("해외 판매", "없는 근거");
 
         Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
 

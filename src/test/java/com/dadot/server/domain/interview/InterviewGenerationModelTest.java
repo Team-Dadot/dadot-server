@@ -114,47 +114,37 @@ class InterviewGenerationModelTest {
     @ValueSource(strings = {
             "어떤 점을 우선하시겠습니까?",
             "해외영업 전략을 설명해 주세요.",
-            "인재 확보와 유지 방안을 말씀해 주세요."
+            "인재 확보와 유지 방안을 말씀해 주세요.",
+            "어떤 전략이 필요할까요?",
+            "공급 지연에 어떻게 대응하나요?",
+            "비용과 품질 중 무엇을 우선할 것인가요?",
+            "품질과 납기를 함께 개선할 방안을 설명해 보세요.",
+            "어떤 점을 우선할지 설명해주세요",
+            "인재 확보 방안을 제안해 보십시오.",
+            "인재 확보 방안은?"
     })
-    void completeQuestionsAreAccepted(String question) {
-        assertEquals(question, InterviewGeneration.validateComplete(
+    void acceptsQuestionsWithoutRestrictingSentenceEndings(String question) {
+        assertEquals(question, InterviewGeneration.validate(
                 lengthOutput(question, "근거"), lengthInput("근거")).question());
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {
-            "어떤 점을 우선하겠",
-            "어떤 점을 우선하겠?",
-            "어떤 점을 우선하겠.",
-            "해외영업 전략을 설명해 주세요",
-            "해외영업 전략을 설명해 주세요. 추가로",
-            "연구개발을 진행하고 있습니다."
-    })
-    void incompleteQuestionsAreRejectedEvenWithPunctuation(String question) {
-        Failure failure = assertThrows(Failure.class, () -> InterviewGeneration.validateComplete(
-                lengthOutput(question, "근거"), lengthInput("근거")));
-        assertEquals("QUESTION_INCOMPLETE", failure.code());
-        assertFalse(failure.retryable());
-    }
-
     @Test
-    void screenshotQuestionAtExactly100CharactersIsRejected() {
+    void doesNotRejectOrModifyQuestionBasedOnItsEnding() {
         String question = "삼진제약은 후보물질 탐색부터 임상 1상까지 다양한 연구개발을 진행하고 있습니다. "
                 + "인사 담당자로서 이러한 연구개발 조직의 특성을 고려해 인재를 확보하고 유지하려면 어떤 점을 우선하겠";
         assertEquals(100, question.codePointCount(0, question.length()));
-        assertEquals("QUESTION_INCOMPLETE", assertThrows(Failure.class,
-                () -> InterviewGeneration.validateComplete(lengthOutput(question, "근거"),
-                        lengthInput("근거"))).code());
+        assertEquals(question, InterviewGeneration.validate(
+                lengthOutput(question, "근거"), lengthInput("근거")).question());
     }
 
     @Test
-    void completeQuestionMustStillFitWithin100CodePoints() {
-        String ending = "말씀해 주세요.";
+    void naturalQuestionMustStillFitWithin100CodePoints() {
+        String ending = "어떤 전략이 필요할까요?";
         String question = "가".repeat(100 - ending.codePointCount(0, ending.length())) + ending;
-        assertEquals(question, InterviewGeneration.validateComplete(
+        assertEquals(question, InterviewGeneration.validate(
                 lengthOutput(question, "근거"), lengthInput("근거")).question());
         assertEquals("QUESTION_GENERATION_FAILED", assertThrows(Failure.class,
-                () -> InterviewGeneration.validateComplete(lengthOutput("가" + question, "근거"),
+                () -> InterviewGeneration.validate(lengthOutput("가" + question, "근거"),
                         lengthInput("근거"))).code());
     }
 

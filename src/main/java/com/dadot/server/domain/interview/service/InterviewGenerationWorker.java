@@ -17,6 +17,7 @@ import java.time.Clock;
 
 @Component
 public class InterviewGenerationWorker {
+    private static final int MAX_ATTEMPTS = 3;
     private static final Logger log =
             LoggerFactory.getLogger(InterviewGenerationWorker.class);
 
@@ -49,7 +50,9 @@ public class InterviewGenerationWorker {
             fixedDelayString = "${app.interview-generation.worker-delay-ms:1000}"
     )
     public void poll() {
-        if (!properties.workerEnabled() || !client.ready()) return;
+        if (!properties.workerEnabled() || !client.ready()) {
+            return;
+        }
 
         try {
             runOnce();
@@ -62,13 +65,18 @@ public class InterviewGenerationWorker {
     }
 
     public void runOnce() {
-        if (!client.ready()) return;
+        if (!client.ready()) {
+            return;
+        }
 
         var claim = write.execute(
                 tx -> repository.claim(clock.instant())
         );
 
-        if (claim == null) return;
+        if (claim == null) {
+            return;
+        }
+
         Output output = null;
 
         try {
@@ -76,7 +84,9 @@ public class InterviewGenerationWorker {
                     tx -> repository.load(claim, clock.instant())
             );
 
-            if (lease == null) return;
+            if (lease == null) {
+                return;
+            }
 
             // 외부 HTTP 호출은 DB 트랜잭션 밖에서 실행한다.
             output = client.generate(lease);
@@ -88,11 +98,26 @@ public class InterviewGenerationWorker {
                     )
             );
         } catch (Failure ex) {
-            Failure failure = ex.metadata() != null || output == null
-                    ? ex
-                    : new Failure(
-                    ex.code(), ex.retryable(),
-                    ex.retryAfter(), output.metadata()
+            // 생성 결과를 받은 뒤 저장소에서 발생하는 일반 검증 오류는 질문 중복이다.
+            String reason = output != null
+                    && "INVALID_OUTPUT".equals(ex.reason())
+                    ? "QUESTION_DUPLICATE"
+                    : ex.reason();
+
+            boolean retry = claim.attempt() < MAX_ATTEMPTS
+                    && (
+                    ex.retryable()
+                            || "QUESTION_TOO_LONG".equals(reason)
+            );
+
+            Failure failure = new Failure(
+                    ex.code(),
+                    retry,
+                    ex.retryAfter(),
+                    ex.metadata() != null || output == null
+                            ? ex.metadata()
+                            : output.metadata(),
+                    reason
             );
 
             write.executeWithoutResult(
@@ -102,8 +127,12 @@ public class InterviewGenerationWorker {
             );
 
             log.warn(
-                    "Interview generation task={} code={}",
-                    claim.taskId(), failure.code()
+                    "Interview generation task={} attempt={} code={} reason={} retry={}",
+                    claim.taskId(),
+                    claim.attempt(),
+                    failure.code(),
+                    failure.reason(),
+                    failure.retryable()
             );
         } catch (BusinessException ex) {
             var failure = new Failure(

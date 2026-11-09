@@ -57,6 +57,12 @@ public class OpenAiInterviewClient {
             출력은 question과 evidence만 포함한다. 정답·예시 답변·점수·개인 원문 해설을 생성하지 않는다.
             """;
 
+    private static final String RETRY_INSTRUCTIONS = """
+            이번 요청은 재시도다. 이전 문장을 그대로 반복하지 말고 질문을 새로 작성한다.
+            질문은 공백 포함 50~80자로 간결하게 작성하고 반드시 100자 이내로 완성한다.
+            길면 배경 설명부터 줄인다. 문장 중간을 자르지 않고 특정 어미를 강제하지 않는다.
+            """;
+
     private final JsonMapper mapper;
     private final InterviewGenerationProperties properties;
     private final HttpClient http;
@@ -107,23 +113,32 @@ public class OpenAiInterviewClient {
     public String policyHash(String rules) {
         return InterviewGeneration.sha256(
                 InterviewGeneration.PROMPT_VERSION
-                        + INSTRUCTIONS + rules
-                        + "schema-v1:q100:free-ending-v1:quote500:low:4096"
+                        + INSTRUCTIONS + RETRY_INSTRUCTIONS + rules
+                        + "schema-v1:q100:length-retry-v1:quote500:low:4096"
         );
     }
 
     // 접수 시에도 실제 요청 크기를 검사하며 초과 입력을 자르지 않는다.
     public byte[] encode(String model, String rules, Input input) {
+        return encode(model, rules, input, false);
+    }
+
+    private byte[] encode(
+            String model,
+            String rules,
+            Input input,
+            boolean retry
+    ) {
         String instructions = "관리자 생성 지침:\n" + rules
-                + "\n서버 필수 규칙:\n" + INSTRUCTIONS;
+                + "\n서버 필수 규칙:\n" + INSTRUCTIONS
+                + (retry ? "\n재시도 지침:\n" + RETRY_INSTRUCTIONS : "");
 
         var body = Map.of(
                 "model", model,
                 "store", false,
                 "reasoning", Map.of("effort", "low"),
                 "max_output_tokens", 4096,
-                "instructions",
-                instructions,
+                "instructions", instructions,
                 "input", mapper.writeValueAsString(input),
                 "text", Map.of(
                         "format", Map.of(
@@ -145,13 +160,20 @@ public class OpenAiInterviewClient {
     }
 
     public Output generate(Lease lease) {
-        if (!ready()) throw new Failure("AI_NOT_CONFIGURED", false);
+        if (!ready()) {
+            throw new Failure("AI_NOT_CONFIGURED", false);
+        }
 
         if (!policyHash(lease.rules()).equals(lease.promptHash())) {
             throw new Failure("AI_POLICY_CHANGED", false);
         }
 
-        byte[] bytes = encode(lease.model(), lease.rules(), lease.input());
+        byte[] bytes = encode(
+                lease.model(),
+                lease.rules(),
+                lease.input(),
+                lease.attempt() > 1
+        );
 
         String clientId = UUID.nameUUIDFromBytes(
                 (lease.taskId() + ":" + lease.runId())
@@ -175,7 +197,9 @@ public class OpenAiInterviewClient {
             );
 
             String requestId = safe(
-                    response.headers().firstValue("x-request-id").orElse(null),
+                    response.headers()
+                            .firstValue("x-request-id")
+                            .orElse(null),
                     255
             );
 
@@ -188,7 +212,9 @@ public class OpenAiInterviewClient {
 
                 try {
                     String code = mapper.readTree(response.body())
-                            .path("error").path("code").asText();
+                            .path("error")
+                            .path("code")
+                            .asText();
 
                     quota = "insufficient_quota".equals(code)
                             || "billing_hard_limit_reached".equals(code);
@@ -208,7 +234,8 @@ public class OpenAiInterviewClient {
                         retry,
                         retryAfter(
                                 response.headers()
-                                        .firstValue("Retry-After").orElse(null)
+                                        .firstValue("Retry-After")
+                                        .orElse(null)
                         ),
                         metadata
                 );
@@ -233,13 +260,17 @@ public class OpenAiInterviewClient {
                 var output = root.get("output");
 
                 if (output == null || !output.isArray()) {
-                    throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata);
+                    throw new Failure(
+                            "AI_INVALID_OUTPUT", false, 0, metadata
+                    );
                 }
 
                 String json = null;
 
                 for (var item : output) {
-                    if (!"message".equals(item.path("type").asText())) continue;
+                    if (!"message".equals(item.path("type").asText())) {
+                        continue;
+                    }
 
                     var contents = item.path("content");
 
@@ -272,7 +303,9 @@ public class OpenAiInterviewClient {
                 }
 
                 if (json == null) {
-                    throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata);
+                    throw new Failure(
+                            "AI_INVALID_OUTPUT", false, 0, metadata
+                    );
                 }
 
                 JsonNode value = mapper.reader()
@@ -289,9 +322,11 @@ public class OpenAiInterviewClient {
             } catch (Failure ex) {
                 throw ex.metadata() != null
                         ? ex
-                        : new Failure(ex.code(), ex.retryable(), ex.retryAfter(), metadata);
+                        : ex.withMetadata(metadata);
             } catch (RuntimeException ex) {
-                throw new Failure("AI_INVALID_OUTPUT", false, 0, metadata);
+                throw new Failure(
+                        "AI_INVALID_OUTPUT", false, 0, metadata
+                );
             }
         } catch (InterruptedException ex) {
             pending.cancel(true);
@@ -299,7 +334,11 @@ public class OpenAiInterviewClient {
             throw new Failure("AI_INTERRUPTED", true);
         } catch (ExecutionException ex) {
             pending.cancel(true);
-            if (ex.getCause() instanceof Failure failure) throw failure;
+
+            if (ex.getCause() instanceof Failure failure) {
+                throw failure;
+            }
+
             throw new Failure("AI_CONNECTION_ERROR", true);
         } catch (TimeoutException ex) {
             pending.cancel(true);
@@ -308,7 +347,9 @@ public class OpenAiInterviewClient {
     }
 
     private long retryAfter(String value) {
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
 
         try {
             long seconds = value.matches("[0-9]{1,9}")
@@ -316,7 +357,8 @@ public class OpenAiInterviewClient {
                     : Duration.between(
                     clock.instant(),
                     ZonedDateTime.parse(
-                            value, DateTimeFormatter.RFC_1123_DATE_TIME
+                            value,
+                            DateTimeFormatter.RFC_1123_DATE_TIME
                     ).toInstant()
             ).getSeconds();
 
@@ -355,7 +397,9 @@ public class OpenAiInterviewClient {
 
     private static Map<String, Object> string(int maximum) {
         return Map.of(
-                "type", "string", "minLength", 1, "maxLength", maximum
+                "type", "string",
+                "minLength", 1,
+                "maxLength", maximum
         );
     }
 
@@ -394,8 +438,10 @@ public class OpenAiInterviewClient {
 
     private static final class LimitedBody
             implements HttpResponse.BodySubscriber<byte[]> {
-        private final CompletableFuture<byte[]> body = new CompletableFuture<>();
-        private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        private final CompletableFuture<byte[]> body =
+                new CompletableFuture<>();
+        private final ByteArrayOutputStream bytes =
+                new ByteArrayOutputStream();
         private Flow.Subscription subscription;
 
         public CompletionStage<byte[]> getBody() {

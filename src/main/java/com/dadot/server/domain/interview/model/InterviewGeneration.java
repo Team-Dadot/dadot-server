@@ -21,7 +21,8 @@ import java.util.UUID;
 public final class InterviewGeneration {
     public static final ZoneId KST = ZoneId.of("Asia/Seoul");
     public static final String PROMPT_VERSION = "interview-generation-v1";
-    public static final Set<String> REPORT_TYPES = Set.of("ANNUAL", "HALF_YEAR", "QUARTERLY");
+    public static final Set<String> REPORT_TYPES =
+            Set.of("ANNUAL", "HALF_YEAR", "QUARTERLY");
 
     private InterviewGeneration() {}
 
@@ -209,6 +210,7 @@ public final class InterviewGeneration {
         private final boolean retryable;
         private final long retryAfter;
         private final Metadata metadata;
+        private final String reason;
 
         public Failure(String code, boolean retryable) {
             this(code, retryable, 0, null);
@@ -220,27 +222,43 @@ public final class InterviewGeneration {
                 long retryAfter,
                 Metadata metadata
         ) {
+            this(code, retryable, retryAfter, metadata, code);
+        }
+
+        public Failure(
+                String code,
+                boolean retryable,
+                long retryAfter,
+                Metadata metadata,
+                String reason
+        ) {
             super(code);
             this.code = code;
             this.retryable = retryable;
             this.retryAfter = Math.clamp(retryAfter, 0, 60);
             this.metadata = metadata;
+            this.reason = reason;
         }
 
         public String code() { return code; }
         public boolean retryable() { return retryable; }
         public long retryAfter() { return retryAfter; }
         public Metadata metadata() { return metadata; }
+        public String reason() { return reason; }
+
+        public Failure withMetadata(Metadata value) {
+            return new Failure(code, retryable, retryAfter, value, reason);
+        }
     }
 
     public static Generated validate(JsonNode value, Input input) {
         fields(value, Set.of("question", "evidence"));
 
-        String question = string(value.get("question"), 100);
+        String question = string(value.get("question"), 100, "QUESTION");
         JsonNode evidence = value.get("evidence");
 
         if (!evidence.isArray() || evidence.isEmpty() || evidence.size() > 3) {
-            throw invalidOutput();
+            throw invalidOutput("EVIDENCE_COUNT");
         }
 
         var checked = new ArrayList<Quote>();
@@ -251,14 +269,25 @@ public final class InterviewGeneration {
 
             long version = outputId(item.get("disclosureVersionId"));
             long section = outputId(item.get("sectionId"));
-            String quote = string(item.get("quote"), 500);
+            String quote = string(item.get("quote"), 500, "EVIDENCE_QUOTE");
 
-            if (!ids.add(section) || input.sections().stream().noneMatch(
-                    s -> s.sectionId() == section
-                            && s.disclosureVersionId() == version
-                            && s.content().contains(quote)
-            )) {
-                throw invalidOutput();
+            if (!ids.add(section)) {
+                throw invalidOutput("EVIDENCE_SECTION_DUPLICATE");
+            }
+
+            Section source = input.sections().stream()
+                    .filter(s -> s.sectionId() == section)
+                    .findFirst()
+                    .orElseThrow(
+                            () -> invalidOutput("EVIDENCE_SECTION_UNKNOWN")
+                    );
+
+            if (source.disclosureVersionId() != version) {
+                throw invalidOutput("EVIDENCE_VERSION_MISMATCH");
+            }
+
+            if (!source.content().contains(quote)) {
+                throw invalidOutput("EVIDENCE_QUOTE_MISMATCH");
             }
 
             checked.add(new Quote(version, section, quote));
@@ -297,22 +326,34 @@ public final class InterviewGeneration {
     }
 
     public static Failure invalidOutput() {
-        return new Failure("QUESTION_GENERATION_FAILED", false);
+        return invalidOutput("INVALID_OUTPUT");
     }
 
-    private static String string(JsonNode node, int max) {
-        if (node == null || !node.isTextual() || node.asText().isBlank()
-                || node.asText().codePointCount(0, node.asText().length()) > max) {
-            throw invalidOutput();
+    private static Failure invalidOutput(String reason) {
+        return new Failure(
+                "QUESTION_GENERATION_FAILED", false, 0, null, reason
+        );
+    }
+
+    private static String string(JsonNode node, int max, String field) {
+        if (node == null || !node.isTextual() || node.asText().isBlank()) {
+            throw invalidOutput(field + "_EMPTY");
         }
 
-        return node.asText();
+        String value = node.asText();
+
+        if (value.codePointCount(0, value.length()) > max) {
+            throw invalidOutput(field + "_TOO_LONG");
+        }
+
+        return value;
     }
 
     private static long outputId(JsonNode node) {
         if (node == null || !node.isIntegralNumber() || !node.canConvertToLong()
-                || node.longValue() < 1 || node.longValue() > InterviewPolicy.MAX_ID) {
-            throw invalidOutput();
+                || node.longValue() < 1
+                || node.longValue() > InterviewPolicy.MAX_ID) {
+            throw invalidOutput("EVIDENCE_ID_INVALID");
         }
 
         return node.longValue();
@@ -321,7 +362,7 @@ public final class InterviewGeneration {
     public static void fields(JsonNode node, Set<String> names) {
         if (node == null || !node.isObject() || node.size() != names.size()
                 || !node.propertyNames().containsAll(names)) {
-            throw invalidOutput();
+            throw invalidOutput("JSON_STRUCTURE_INVALID");
         }
     }
 }

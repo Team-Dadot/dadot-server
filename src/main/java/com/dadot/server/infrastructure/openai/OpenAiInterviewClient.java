@@ -45,9 +45,12 @@ public class OpenAiInterviewClient {
             과거 질문과 동일한 질문 또는 단순 표현만 바꾼 질문을 피한다.
             180초 이내 답변할 수 있는 한 가지 핵심 질문을 작성한다.
             질문은 공백 포함 Unicode 코드 포인트 기준 50~80자를 권장하며 최대 100자다.
-            질문 전체를 1~2문장으로 작성하고 한 가지 핵심 질문만 묻는다.
+            질문은 한 문장으로 작성하고 한 가지 핵심 질문만 묻는다.
+            긴 배경 설명으로 시작하지 말고 기업명과 핵심 사안만 짧게 포함해 바로 질문한다.
             질문은 반드시 완결된 문장으로 끝낸다. 글자 수를 맞추려고 단어나 문장 끝을 자르지 않는다.
+            질문을 먼저 완결한 다음 길이를 확인한다.
             100자를 넘길 경우 배경 설명을 줄이고 질문 전체를 다시 작성한다.
+            100자까지 채울 필요가 없다. 짧더라도 질문의 끝까지 완성한다.
             문장 끝 표현은 자연스럽게 작성하며 특정 어미나 표현으로 제한하지 않는다.
             화면에 함께 제공되는 공시 근거의 설명을 반복하지 않고 답변에 필요한 최소 맥락만 포함한다.
             긴 공시 설명, 세부 수치와 조치 내역을 질문에 나열하지 않는다.
@@ -114,7 +117,7 @@ public class OpenAiInterviewClient {
         return InterviewGeneration.sha256(
                 InterviewGeneration.PROMPT_VERSION
                         + INSTRUCTIONS + RETRY_INSTRUCTIONS + rules
-                        + "schema-v1:q100:length-retry-v1:quote500:low:4096"
+                        + "schema-v2:question-unbounded:server-q100:length-retry-v1:quote500:low:4096"
         );
     }
 
@@ -431,7 +434,10 @@ public class OpenAiInterviewClient {
         ));
 
         return object(Map.of(
-                "question", string(100),
+                "question", Map.of(
+                        "type", "string",
+                        "minLength", 1
+                ),
                 "evidence", array(evidence, 1, 3)
         ));
     }

@@ -1,5 +1,7 @@
 package com.dadot.server.domain.quiz.model;
 
+import com.dadot.server.domain.company.model.PreparationCompany.Job;
+
 import java.time.Instant;
 import java.util.List;
 
@@ -44,7 +46,8 @@ public final class QuizReview {
             QuizPlay.Company company,
             boolean isActive,
             long quizQuestionCount,
-            long interviewQuestionCount
+            long interviewQuestionCount,
+            Job job
     ) {}
 
     public record CompanyPage(

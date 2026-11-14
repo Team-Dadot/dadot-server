@@ -274,7 +274,10 @@ class RefreshTokenIntegrationTest {
 
             latest.migrate();
 
-            assertEquals("20",latest.info().current().getVersion().toString());
+            // V20 이후 마이그레이션이 추가되어도 V20 적용과 최신 상태를 함께 확인한다.
+            assertTrue(latest.info().current().getVersion().compareTo(
+                    org.flywaydb.core.api.MigrationVersion.fromVersion("20")) >= 0);
+            assertEquals(0,latest.info().pending().length);
             assertEquals(before,jdbc.queryForMap("select * from auth_sessions where id=?",session));
             assertEquals(0,jdbc.queryForObject("select count(*) from auth_refresh_families",Integer.class));
             assertEquals(0,jdbc.queryForObject("select count(*) from auth_refresh_tokens",Integer.class));

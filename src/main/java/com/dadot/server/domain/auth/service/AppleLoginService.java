@@ -132,7 +132,8 @@ public class AppleLoginService {
                         key,
                         verified.subject(),
                         validUntil,
-                        verified.email()
+                        verified.email(),
+                        request.fullName()
                 );
 
             } catch (RuntimeException ex) {

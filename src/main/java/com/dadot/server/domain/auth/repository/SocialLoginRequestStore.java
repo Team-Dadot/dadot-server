@@ -4,6 +4,7 @@ import com.dadot.server.domain.auth.dto.request.AppleLoginRequest;
 import com.dadot.server.domain.auth.dto.response.SocialLoginResponse;
 import com.dadot.server.domain.auth.support.VerificationCrypto;
 import com.dadot.server.domain.auth.support.VerificationTokenCrypto;
+import com.dadot.server.domain.auth.support.SocialNickname;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -59,6 +60,13 @@ public class SocialLoginRequestStore {
             AppleLoginRequest body,
             String idempotencyKey
     ) {
+        String nickname = SocialNickname.normalize(body.fullName());
+        String originalBodyHmac = hmac.hmac(
+                "AUTH-05-body", "APPLE", body.identityToken(),
+                body.authorizationCode(), body.nonce());
+        // 이름 없는 구버전 요청의 HMAC은 유지한다. 유효한 이름 변경은 같은 키로 재사용할 수 없다.
+        String bodyHmac = nickname == null ? originalBodyHmac
+                : hmac.hmac("AUTH-05-apple-name-v1", originalBodyHmac, nickname);
         return new RequestKey(
                 "APPLE",
                 hmac.hmac(
@@ -71,13 +79,7 @@ public class SocialLoginRequestStore {
                         "idempotency-key",
                         idempotencyKey.toLowerCase(Locale.ROOT)
                 ),
-                hmac.hmac(
-                        "AUTH-05-body",
-                        "APPLE",
-                        body.identityToken(),
-                        body.authorizationCode(),
-                        body.nonce()
-                )
+                bodyHmac
         );
     }
 

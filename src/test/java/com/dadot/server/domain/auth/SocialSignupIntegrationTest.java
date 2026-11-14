@@ -15,6 +15,7 @@ import com.dadot.server.global.security.AccessTokenIssuer;
 import com.dadot.server.global.security.SessionJwtAuthenticationConverter;
 import com.dadot.server.global.security.UserPrincipal;
 import com.dadot.server.infrastructure.kakao.KakaoClient;
+import com.dadot.server.infrastructure.kakao.KakaoProfileClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -101,6 +102,9 @@ class SocialSignupIntegrationTest {
     @MockitoBean
     KakaoClient kakao;
 
+    @MockitoBean
+    KakaoProfileClient profiles;
+
     @MockitoSpyBean
     SocialSignupRequestStore requests;
 
@@ -144,7 +148,7 @@ class SocialSignupIntegrationTest {
                 )
         );
 
-        reset(kakao, requests, tokens, guards);
+        reset(kakao, profiles, requests, tokens, guards);
 
         when(kakao.verify(KAKAO_TOKEN))
                 .thenAnswer(invocation ->
@@ -163,11 +167,62 @@ class SocialSignupIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        reset(kakao, requests, tokens, guards);
+        reset(kakao, profiles, requests, tokens, guards);
 
         jdbc.update("delete from user_devices");
         jdbc.update("delete from user_agreements");
         jdbc.update("delete from service_terms");
+    }
+
+    @Test
+    void consentedKakaoNicknameSurvivesTermsAndIdempotentSignup() {
+        when(profiles.nickname(KAKAO_TOKEN, SUBJECT)).thenAnswer(call -> {
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager
+                    .isActualTransactionActive());
+            return "진영🐱";
+        });
+        String loginKey = key();
+        var loginBody = new KakaoLoginRequest(KAKAO_TOKEN);
+        var first = login.login(loginBody, loginKey, IP);
+        assertEquals(first, login.login(loginBody, loginKey, IP));
+        verify(profiles, times(1)).nickname(KAKAO_TOKEN, SUBJECT);
+        assertEquals("진영🐱", jdbc.queryForObject(
+                "select subject_nickname from auth_proofs", String.class));
+        var body = request(first.registrationToken(), termsId);
+        String signupKey = key();
+        var account = submit(body, signupKey);
+        assertEquals(account, submit(body, signupKey));
+        assertEquals("진영🐱", jdbc.queryForObject("select nickname from users", String.class));
+        assertEquals(1, count("users"));
+    }
+
+    @Test
+    void existingKakaoLoginKeepsStoredNicknameAndDoesNotFetchProfileAgain() {
+        when(profiles.nickname(KAKAO_TOKEN, SUBJECT)).thenReturn("처음 이름");
+        submit(request(kakaoProof(), termsId), key());
+        clearInvocations(profiles);
+        when(profiles.nickname(KAKAO_TOKEN, SUBJECT)).thenReturn("변경된 카카오 이름");
+        var result = login.login(new KakaoLoginRequest(KAKAO_TOKEN), key(), IP);
+        assertEquals(com.dadot.server.domain.auth.dto.response.SocialLoginResponse.Status.LOGIN_COMPLETED,
+                result.status());
+        assertEquals("처음 이름", jdbc.queryForObject("select nickname from users", String.class));
+        verifyNoInteractions(profiles);
+    }
+
+    @Test
+    void missingKakaoNicknameStillCompletesSignupWithExistingFallbackFormat() {
+        submit(request(kakaoProof(), termsId), key());
+        assertTrue(jdbc.queryForObject("select nickname from users", String.class)
+                .matches("다닷[0-9a-f]{12}"));
+    }
+
+    @Test
+    void profileDataCannotBypassKakaoCredentialVerification() {
+        when(kakao.verify(KAKAO_TOKEN)).thenThrow(
+                new BusinessException(ErrorCode.INVALID_SOCIAL_CREDENTIAL));
+        assertCode(ErrorCode.INVALID_SOCIAL_CREDENTIAL, () -> kakaoProof());
+        verifyNoInteractions(profiles);
+        assertEquals(0, count("auth_proofs"));
     }
 
     @Test

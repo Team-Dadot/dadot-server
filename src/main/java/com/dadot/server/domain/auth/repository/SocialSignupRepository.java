@@ -2,6 +2,7 @@ package com.dadot.server.domain.auth.repository;
 
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
+import com.dadot.server.domain.auth.support.SocialNickname;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -13,7 +14,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 @Repository
 @RequiredArgsConstructor
@@ -54,6 +54,7 @@ public class SocialSignupRepository {
                 """
                 select
                     subject_email,
+                    subject_nickname,
                     issued_at,
                     expires_at,
                     consumed_at,
@@ -71,6 +72,7 @@ public class SocialSignupRepository {
                 (rs, row) -> new Proof(
                         source,
                         rs.getString("subject_email"),
+                        rs.getString("subject_nickname"),
                         rs.getObject(
                                 "issued_at",
                                 LocalDateTime.class
@@ -120,11 +122,7 @@ public class SocialSignupRepository {
     ) {
         var key = new GeneratedKeyHolder();
 
-        String nickname = "다닷"
-                + UUID.randomUUID()
-                .toString()
-                .replace("-", "")
-                .substring(0, 12);
+        String nickname = SocialNickname.initial(proof.nickname());
 
         jdbc.update(connection -> {
             var statement = connection.prepareStatement(
@@ -339,6 +337,7 @@ public class SocialSignupRepository {
     public record Proof(
             Source source,
             String email,
+            String nickname,
             Instant issuedAt,
             Instant expiresAt,
             boolean consumed,

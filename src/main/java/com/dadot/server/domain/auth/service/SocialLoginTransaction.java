@@ -8,6 +8,7 @@ import com.dadot.server.domain.auth.repository.SocialLoginRequestStore.RequestKe
 import com.dadot.server.domain.auth.repository.SocialLoginRequestStore.Result;
 import com.dadot.server.domain.auth.support.VerificationCrypto;
 import com.dadot.server.domain.auth.support.VerificationTokenCrypto;
+import com.dadot.server.domain.auth.support.SocialNickname;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import com.dadot.server.global.security.AccessTokenIssuer;
@@ -59,6 +60,14 @@ public class SocialLoginTransaction {
             RequestKey key,
             KakaoClient.Verified verified
     ) {
+        return complete(key, verified, null);
+    }
+
+    public SocialLoginResponse complete(
+            RequestKey key,
+            KakaoClient.Verified verified,
+            String nickname
+    ) {
         if (!"KAKAO".equals(key.provider())) {
             throw new IllegalArgumentException(
                     "Kakao request key required"
@@ -69,7 +78,8 @@ public class SocialLoginTransaction {
                 key,
                 verified.subject(),
                 verified.validUntil(),
-                null
+                null,
+                nickname
         );
     }
 
@@ -78,6 +88,16 @@ public class SocialLoginTransaction {
             String subject,
             Instant validUntil,
             String email
+    ) {
+        return complete(key, subject, validUntil, email, null);
+    }
+
+    public SocialLoginResponse complete(
+            RequestKey key,
+            String subject,
+            Instant validUntil,
+            String email,
+            String nickname
     ) {
         lockRequest(key);
 
@@ -160,6 +180,7 @@ public class SocialLoginTransaction {
                     key.provider(),
                     subject,
                     email,
+                    SocialNickname.normalize(nickname),
                     crypto.tokenHash(registrationToken),
                     now,
                     expiresAt

@@ -108,6 +108,7 @@ public class SocialLoginRepository {
             String provider,
             String subject,
             String email,
+            String nickname,
             String tokenHash,
             Instant now,
             Instant expiresAt
@@ -120,16 +121,18 @@ public class SocialLoginRepository {
                     provider,
                     provider_subject,
                     subject_email,
+                    subject_nickname,
                     token_hash,
                     issued_at,
                     expires_at
                 )
-                values (?, 'SIGN_UP', ?, ?, ?, ?, ?, ?)
+                values (?, 'SIGN_UP', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 id,
                 provider,
                 subject,
                 email,
+                nickname,
                 tokenHash,
                 utc(now),
                 utc(expiresAt)

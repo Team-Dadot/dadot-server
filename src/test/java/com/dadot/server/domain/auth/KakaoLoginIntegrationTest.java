@@ -12,6 +12,7 @@ import com.dadot.server.global.exception.ErrorCode;
 import com.dadot.server.global.security.AccessTokenIssuer;
 import com.dadot.server.global.security.SessionJwtAuthenticationConverter;
 import com.dadot.server.infrastructure.kakao.KakaoClient;
+import com.dadot.server.infrastructure.kakao.KakaoProfileClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -97,6 +98,9 @@ class KakaoLoginIntegrationTest {
     @MockitoBean
     KakaoClient kakao;
 
+    @MockitoBean
+    KakaoProfileClient profiles;
+
     @MockitoSpyBean
     SocialLoginRequestStore requests;
 
@@ -134,7 +138,7 @@ class KakaoLoginIntegrationTest {
                 )
         );
 
-        reset(kakao, requests, tokens);
+        reset(kakao, profiles, requests, tokens);
 
         when(kakao.verify(TOKEN))
                 .thenAnswer(invocation -> {
@@ -153,7 +157,7 @@ class KakaoLoginIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        reset(kakao, requests, tokens);
+        reset(kakao, profiles, requests, tokens);
     }
 
     @Test

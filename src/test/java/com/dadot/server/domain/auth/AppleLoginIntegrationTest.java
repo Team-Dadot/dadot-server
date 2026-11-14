@@ -146,6 +146,96 @@ class AppleLoginIntegrationTest {
     }
 
     @Test
+    void firstAppleNameIsBoundToProofThenSurvivesTermsSignup() {
+        var body = namedRequest("김 진영");
+        String loginKey = key();
+        var first = service.login(body, loginKey, IP);
+        assertEquals(first, service.login(body, loginKey, IP));
+        assertEquals("김 진영", jdbc.queryForObject(
+                "select subject_nickname from auth_proofs", String.class));
+        var signupBody = new SocialSignupRequest(first.registrationToken(), List.of(nameTestTerms()));
+        String signupKey = key();
+        var account = signup.signup(signupBody, signupKey, IP);
+        assertEquals(account, signup.signup(signupBody, signupKey, IP));
+        assertEquals("김 진영", jdbc.queryForObject("select nickname from users", String.class));
+        assertEquals(1, count("users"));
+        assertFalse(body.toString().contains("김 진영"));
+    }
+
+    @Test
+    void laterAppleLoginWithMissingOrChangedNameKeepsInitialNickname() {
+        var first = service.login(namedRequest("처음 이름"), key(), IP);
+        var account = signup.signup(new SocialSignupRequest(
+                first.registrationToken(), List.of(nameTestTerms())), key(), IP);
+        assertEquals(account.userId(), service.login(request(), key(), IP).userId());
+        assertEquals(account.userId(), service.login(namedRequest("다른 이름"), key(), IP).userId());
+        assertEquals("처음 이름", jdbc.queryForObject("select nickname from users", String.class));
+    }
+
+    @Test
+    void changedAppleNameWithSameKeyConflictsWithoutReexchangingCode() {
+        var body = namedRequest("처음 이름");
+        String loginKey = key();
+        service.login(body, loginKey, IP);
+        assertCode(ErrorCode.IDEMPOTENCY_CONFLICT, () -> service.login(new AppleLoginRequest(
+                body.identityToken(), body.authorizationCode(), body.nonce(), "다른 이름"), loginKey, IP));
+        verify(apple, times(1)).exchange(anyString(), anyString(), any());
+        assertEquals("처음 이름", jdbc.queryForObject(
+                "select subject_nickname from auth_proofs", String.class));
+    }
+
+    @Test
+    void absentAppleNameUsesFallbackForOldAppAndDoesNotBlockSignup() {
+        var first = service.login(request(), key(), IP);
+        signup.signup(new SocialSignupRequest(
+                first.registrationToken(), List.of(nameTestTerms())), key(), IP);
+        assertTrue(jdbc.queryForObject("select nickname from users", String.class)
+                .matches("다닷[0-9a-f]{12}"));
+    }
+
+    @Test
+    void nameOutsideCurrentNicknamePolicyUsesFallbackWithoutTruncating() {
+        var first = service.login(namedRequest("가".repeat(21)), key(), IP);
+        assertNull(jdbc.queryForObject("select subject_nickname from auth_proofs", String.class));
+        signup.signup(new SocialSignupRequest(
+                first.registrationToken(), List.of(nameTestTerms())), key(), IP);
+        assertTrue(jdbc.queryForObject("select nickname from users", String.class)
+                .matches("다닷[0-9a-f]{12}"));
+    }
+
+    @Test
+    void endpointAcceptsOptionalFullNameButRejectsOversizedFieldBeforeAppleCall() throws Exception {
+        var body = namedRequest("진영");
+        mvc.perform(post(PATH).header("Idempotency-Key", key())
+                        .contentType("application/json").content(mapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SIGN_UP_REQUIRED"));
+        assertEquals("진영", jdbc.queryForObject("select subject_nickname from auth_proofs", String.class));
+        clearInvocations(apple);
+        var oversized = new AppleLoginRequest(body.identityToken(), body.authorizationCode(),
+                body.nonce(), "가".repeat(201));
+        mvc.perform(post(PATH).header("Idempotency-Key", key())
+                        .contentType("application/json").content(mapper.writeValueAsString(oversized)))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(apple);
+    }
+
+    private AppleLoginRequest namedRequest(String name) {
+        var body = request();
+        return new AppleLoginRequest(body.identityToken(), body.authorizationCode(), body.nonce(), name);
+    }
+
+    private long nameTestTerms() {
+        jdbc.update("""
+                insert into service_terms(code, version, title, content_url, content_hash,
+                    is_required, effective_at, published_at)
+                values ('SERVICE_TERMS', 'name-v1', 'Test', 'https://example.invalid/terms',
+                    repeat('a', 64), true, ?, ?)
+                """, utc(), utc());
+        return jdbc.queryForObject("select id from service_terms", Long.class);
+    }
+
+    @Test
     void challengeEndpointIsPublicNoStoreAndOnlyStoresHash()
             throws Exception {
         String body = mvc.perform(

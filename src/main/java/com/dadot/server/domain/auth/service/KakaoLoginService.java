@@ -3,9 +3,11 @@ package com.dadot.server.domain.auth.service;
 import com.dadot.server.domain.auth.dto.request.KakaoLoginRequest;
 import com.dadot.server.domain.auth.dto.response.SocialLoginResponse;
 import com.dadot.server.domain.auth.repository.SocialLoginRequestStore;
+import com.dadot.server.domain.auth.repository.SocialLoginRepository;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import com.dadot.server.infrastructure.kakao.KakaoClient;
+import com.dadot.server.infrastructure.kakao.KakaoProfileClient;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -31,6 +33,8 @@ public class KakaoLoginService {
                     + "[0-9a-f]{12}\\z";
 
     private final KakaoClient kakao;
+    private final KakaoProfileClient profiles;
+    private final SocialLoginRepository repository;
     private final SocialLoginIpLimiter limiter;
     private final SocialLoginRequestStore requests;
     private final SocialLoginTransaction transaction;
@@ -70,9 +74,16 @@ public class KakaoLoginService {
                     request.accessToken()
             );
 
+            // 외부 프로필 조회는 트랜잭션 밖에서 신규 가입 대상에만 수행한다.
+            // 실제 가입/로그인 판정은 아래 잠금 트랜잭션에서 다시 확인한다.
+            String nickname = repository.findUser("KAKAO", verified.subject()).isEmpty()
+                    ? profiles.nickname(request.accessToken(), verified.subject())
+                    : null;
+
             return transaction.complete(
                     key,
-                    verified
+                    verified,
+                    nickname
             );
 
         } catch (

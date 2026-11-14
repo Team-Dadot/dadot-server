@@ -24,8 +24,16 @@ public record AppleLoginRequest(
         @NotBlank
         @Pattern(regexp = "\\A[A-Za-z0-9_-]{43}\\z")
         @Schema(description = "인증 준비 API에서 받은 nonce 원문")
-        String nonce
+        String nonce,
+
+        @Size(max = 200)
+        @Schema(description = "최초 Apple 인증 시 SDK가 제공한 표시 이름. 미제공 시 생략")
+        String fullName
 ) {
+
+    public AppleLoginRequest(String identityToken, String authorizationCode, String nonce) {
+        this(identityToken, authorizationCode, nonce, null);
+    }
 
     @JsonAnySetter
     public void rejectUnknown(String name, Object value) {

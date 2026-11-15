@@ -109,7 +109,10 @@ public final class InterviewGeneration {
             String sourceUrl,
             String sectionTitle,
             String quote,
-            boolean isSuperseded
+            boolean isSuperseded,
+            LocalDate publishedAt,
+            LocalDate periodStart,
+            LocalDate periodEnd
     ) {}
 
     public record Detail(

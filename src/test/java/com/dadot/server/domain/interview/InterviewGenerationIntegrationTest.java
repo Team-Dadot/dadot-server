@@ -248,6 +248,124 @@ class InterviewGenerationIntegrationTest {
     }
 
     @Test
+    void questionEvidenceIncludesStoredDatesWithoutChangingOriginalFields() throws Exception {
+        long question = generatedQuestionForEvidence();
+        long disclosure = evidenceDisclosure(question);
+        jdbc.update("""
+                update disclosures set disclosed_on = '2026-03-12',
+                    period_start = '2025-01-01', period_end = '2025-12-31'
+                where id = ?
+                """, disclosure);
+
+        var expected = jdbc.queryForMap("""
+                select d.report_name, d.source_url, s.heading, e.quotation
+                from interview_question_evidence e
+                join disclosure_sections s on s.id = e.section_id
+                join disclosure_versions v on v.id = s.disclosure_version_id
+                join disclosures d on d.id = v.disclosure_id
+                where e.question_id = ?
+                """, question);
+        detail(question, token).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.evidence[0].disclosureId").value(disclosure))
+                .andExpect(jsonPath("$.data.evidence[0].reportTitle").value(expected.get("report_name")))
+                .andExpect(jsonPath("$.data.evidence[0].sourceUrl").value(expected.get("source_url")))
+                .andExpect(jsonPath("$.data.evidence[0].sectionTitle").value(expected.get("heading")))
+                .andExpect(jsonPath("$.data.evidence[0].quote").value(expected.get("quotation")))
+                .andExpect(jsonPath("$.data.evidence[0].isSuperseded").value(false))
+                .andExpect(jsonPath("$.data.evidence[0].publishedAt").value("2026-03-12"))
+                .andExpect(jsonPath("$.data.evidence[0].periodStart").value("2025-01-01"))
+                .andExpect(jsonPath("$.data.evidence[0].periodEnd").value("2025-12-31"));
+        assertEquals(0, count("select count(*) from interview_submissions where user_id = ?", user));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"MISSING", "START_ONLY", "END_ONLY"})
+    void unknownPeriodDatesRemainNullInsteadOfBeingInvented(String mode) throws Exception {
+        long question = generatedQuestionForEvidence();
+        jdbc.update("update disclosures set period_start = ?, period_end = ? where id = ?",
+                mode.equals("START_ONLY") ? LocalDate.parse("2025-01-01") : null,
+                mode.equals("END_ONLY") ? LocalDate.parse("2025-12-31") : null,
+                evidenceDisclosure(question));
+        var evidence = data(detail(question, token).andExpect(status().isOk())).get("evidence").get(0);
+        assertEquals("2026-10-20", evidence.get("publishedAt").asString());
+        if (mode.equals("START_ONLY")) {
+            assertEquals("2025-01-01", evidence.get("periodStart").asString());
+        } else {
+            assertTrue(evidence.get("periodStart").isNull());
+        }
+        if (mode.equals("END_ONLY")) {
+            assertEquals("2025-12-31", evidence.get("periodEnd").asString());
+        } else {
+            assertTrue(evidence.get("periodEnd").isNull());
+        }
+    }
+
+    @Test
+    void eachEvidenceKeepsItsOwnDisclosureDatesAndOrder() throws Exception {
+        long question = generatedQuestionForEvidence();
+        jdbc.update("""
+                insert into interview_question_evidence(question_id, user_id, company_id, section_id, quotation)
+                select ?, ?, ?, s.id, s.content_text
+                from disclosure_sections s
+                where s.company_id = ? and not exists (
+                    select 1 from interview_question_evidence e
+                    where e.question_id = ? and e.section_id = s.id)
+                order by s.id limit 1
+                """, question, user, company, company, question);
+        var rows = jdbc.queryForList("""
+                select d.id as disclosure_id, s.id as section_id
+                from interview_question_evidence e
+                join disclosure_sections s on s.id = e.section_id
+                join disclosure_versions v on v.id = s.disclosure_version_id
+                join disclosures d on d.id = v.disclosure_id
+                where e.question_id = ? order by e.section_id
+                """, question);
+        assertEquals(2, rows.size());
+        for (int i = 0; i < rows.size(); i++) {
+            jdbc.update("update disclosures set disclosed_on = ?, period_start = ?, period_end = ? where id = ?",
+                    LocalDate.of(2026, i + 1, 15), LocalDate.of(2025, i + 1, 1),
+                    LocalDate.of(2025, i + 1, 28), rows.get(i).get("disclosure_id"));
+        }
+        var evidence = data(detail(question, token).andExpect(status().isOk())).get("evidence");
+        assertEquals(2, evidence.size());
+        for (int i = 0; i < rows.size(); i++) {
+            assertEquals(((Number) rows.get(i).get("disclosure_id")).longValue(),
+                    evidence.get(i).get("disclosureId").longValue());
+            assertEquals(LocalDate.of(2026, i + 1, 15).toString(), evidence.get(i).get("publishedAt").asString());
+            assertEquals(LocalDate.of(2025, i + 1, 1).toString(), evidence.get(i).get("periodStart").asString());
+            assertEquals(LocalDate.of(2025, i + 1, 28).toString(), evidence.get(i).get("periodEnd").asString());
+        }
+    }
+
+    @Test
+    void supersededEvidenceRetainsOriginalPublicationDate() throws Exception {
+        long question = generatedQuestionForEvidence();
+        jdbc.update("""
+                update disclosure_versions set status = 'SUPERSEDED'
+                where disclosure_id = ?
+                """, evidenceDisclosure(question));
+        detail(question, token).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.evidence[0].isSuperseded").value(true))
+                .andExpect(jsonPath("$.data.evidence[0].publishedAt").value("2026-10-20"))
+                .andExpect(jsonPath("$.data.usage.canSubmit").value(false));
+    }
+
+    private long generatedQuestionForEvidence() throws Exception {
+        String task = accepted();
+        worker.runOnce();
+        return question(task);
+    }
+
+    private long evidenceDisclosure(long question) {
+        return count("""
+                select v.disclosure_id from interview_question_evidence e
+                join disclosure_sections s on s.id = e.section_id
+                join disclosure_versions v on v.id = s.disclosure_version_id
+                where e.question_id = ? order by e.section_id limit 1
+                """, question);
+    }
+
+    @Test
     void generatesOneQuestionFromThreeReportsAndAllExperienceVersionsWithoutUsingQuota()
             throws Exception {
         material("EXPERIENCE", "경험1", "시장조사 경험");

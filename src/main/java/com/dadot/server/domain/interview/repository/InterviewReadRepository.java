@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -292,7 +293,8 @@ public class InterviewReadRepository {
                          or exists(
                              select 1 from disclosures c
                              where c.corrects_disclosure_id = d.id
-                         )
+                         ),
+                       d.disclosed_on, d.period_start, d.period_end
                 from interview_question_evidence e
                 join disclosure_sections s on s.id = e.section_id
                 join disclosure_versions v on v.id = s.disclosure_version_id
@@ -303,7 +305,10 @@ public class InterviewReadRepository {
                 (rs, n) -> new Evidence(
                         rs.getLong(1), rs.getLong(2), rs.getString(3),
                         rs.getString(4), rs.getString(5), rs.getString(6),
-                        rs.getBoolean(7)
+                        rs.getBoolean(7),
+                        rs.getObject(8, LocalDate.class),
+                        rs.getObject(9, LocalDate.class),
+                        rs.getObject(10, LocalDate.class)
                 ),
                 id
         );

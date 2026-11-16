@@ -89,7 +89,8 @@ class OpenAiQuizClientTest {
         assertEquals(0, questions.path("minItems").asInt());
         assertEquals(3, questions.path("maxItems").asInt());
         var fields = questions.path("items").path("properties");
-        assertEquals(45, fields.path("question").path("maxLength").asInt());
+        assertFalse(fields.path("question").has("maxLength"));
+        assertEquals(1, fields.path("question").path("minLength").asInt());
         assertEquals(120, fields.path("explanation").path("maxLength").asInt());
         assertEquals(4, fields.path("options").path("minItems").asInt());
         assertEquals(4, fields.path("options").path("maxItems").asInt());
@@ -223,6 +224,19 @@ class OpenAiQuizClientTest {
         assertEquals(valid.path("options").get(0).path("text").asText(),
                 checked.questions().getFirst().options().getFirst().text());
         assertEquals(valid.path("explanation").asText(), checked.questions().getFirst().explanation());
+    }
+
+    @Test
+    void retriedBatchGetsCompleteQuestionGuidanceWithoutAProviderLengthCap() {
+        var first = lease(client);
+        var retry = new Lease(first.taskId(), first.companyId(), first.userId(), first.owner(), first.fence(),
+                first.runId(), first.batchNo(), 2, first.questionCount(), first.batchCount(),
+                first.questionsPerBatch(), first.maxOutputTokens(), first.model(), first.promptVersion(), first.input());
+        client.generate(retry);
+        assertTrue(received.get().path("instructions").asText().contains("재시도 지침:"));
+        var question = received.get().path("text").path("format").path("schema")
+                .path("properties").path("questions").path("items").path("properties").path("question");
+        assertFalse(question.has("maxLength"));
     }
 
     private OpenAiQuizClient client(Duration timeout) {

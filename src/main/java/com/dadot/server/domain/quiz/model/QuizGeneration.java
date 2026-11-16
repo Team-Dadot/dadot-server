@@ -24,6 +24,8 @@ public final class QuizGeneration {
     public static final int MAX_QUESTION_LENGTH = 45;
     public static final int MAX_OPTION_LENGTH = 20;
     public static final int MAX_EXPLANATION_LENGTH = 120;
+    private static final Pattern QUESTION_ENDING =
+            Pattern.compile("(?:요|까|십시오|바랍니다)[?？.。!！]?$");
     private static final Pattern NORMALIZE = Pattern.compile("[\\p{Z}\\s\\p{P}]+");
     private static final Pattern OPTION_WHITESPACE = Pattern.compile("[\\p{Z}\\s]+");
     private static final Pattern OPTION_PUNCTUATION = Pattern.compile(
@@ -76,7 +78,11 @@ public final class QuizGeneration {
     public record Plan(List<Source> sources, List<Input> batches, int sectionCount) {}
     public record Metadata(String requestId, String model, Integer inputTokens, Integer outputTokens) {}
     public record Output(JsonNode questions, Metadata metadata) {}
-    public record Validated(List<QuizBank.Content> questions, int rejectedCount) {}
+    public record Validated(List<QuizBank.Content> questions, int rejectedCount, int incompleteCount) {
+        public Validated(List<QuizBank.Content> questions, int rejectedCount) {
+            this(questions, rejectedCount, 0);
+        }
+    }
     public record Lease(String taskId, long companyId, long userId, String owner, long fence,
                         long runId, int batchNo, int attempt, int questionCount, int batchCount,
                         int questionsPerBatch, int maxOutputTokens, String model,
@@ -97,6 +103,7 @@ public final class QuizGeneration {
         var accepted = new ArrayList<QuizBank.Content>();
         var seen = new HashSet<String>();
         int rejected = 0;
+        int incomplete = 0;
         for (var item : questions) {
             try {
                 fields(item, Set.of("question", "options", "correctOptionPosition", "explanation", "evidence"), Set.of());
@@ -120,13 +127,18 @@ public final class QuizGeneration {
                             || !source.text().contains(evidence.quote())) throw QuizBank.invalid();
                     primaryEvidence |= primary.contains(evidence.sectionId());
                 }
-                if (!primaryEvidence || !seen.add(fingerprint(content.question()))) throw QuizBank.invalid();
+                if (!primaryEvidence) throw QuizBank.invalid();
+                if (!QUESTION_ENDING.matcher(content.question().stripTrailing()).find()) {
+                    incomplete++;
+                    throw QuizBank.invalid();
+                }
+                if (!seen.add(fingerprint(content.question()))) throw QuizBank.invalid();
                 accepted.add(content);
             } catch (BusinessException | IllegalArgumentException ex) {
                 rejected++;
             }
         }
-        return new Validated(List.copyOf(accepted), rejected);
+        return new Validated(List.copyOf(accepted), rejected, incomplete);
     }
 
     public static String uuid(String value) {

@@ -547,6 +547,94 @@ class QuizGenerationIntegrationTest {
         assertEquals(0, count("select count(*) from api_idempotency_requests where user_id=?", user));
     }
 
+    @Test
+    void regeneratesTheSameBatchAfterUnfinishedQuestionsAndRecordsEachCallUsage() throws Exception {
+        var attempts = new ArrayList<Lease>();
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            attempts.add(lease);
+            return lease.attempt() == 1 ? unfinished(lease, false) : output(lease);
+        }).when(client).generate(any());
+        String task = start(3);
+        var result = drain(task);
+        assertEquals("SUCCEEDED", result.path("status").asText());
+        assertEquals(3, result.path("createdCount").asInt());
+        assertEquals(List.of(1, 2), attempts.stream().map(Lease::attempt).toList());
+        assertTrue(attempts.stream().allMatch(l -> l.taskId().equals(task) && l.batchNo() == 0));
+        assertEquals(200, count("select sum(input_tokens) from ai_task_runs where task_id=?", task));
+        assertEquals(120, count("select sum(output_tokens) from ai_task_runs where task_id=?", task));
+        assertEquals(0, count("select count(*) from quiz_question_versions where company_id=? and question_text='무엇'", company));
+    }
+
+    @Test
+    void preservesValidSiblingsAndAllocatesNewCandidateOrdinalsOnRegeneration() throws Exception {
+        var attempts = new ArrayList<Lease>();
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            attempts.add(lease);
+            return lease.attempt() == 1 ? unfinished(lease, true) : output(lease);
+        }).when(client).generate(any());
+        String task = start(3);
+        var result = drain(task);
+        assertEquals("SUCCEEDED", result.path("status").asText());
+        assertEquals(3, result.path("createdCount").asInt());
+        assertEquals(2, attempts.size());
+        assertEquals(3, count("select count(*) from quiz_generation_candidates where task_id=?", task));
+        assertEquals(3, count("select count(distinct candidate_no) from quiz_generation_candidates where task_id=? and batch_no=0", task));
+        assertEquals(3, count("select count(*) from quiz_question_versions where company_id=?", company));
+    }
+
+    @Test
+    void repeatedIncompleteQuestionsStopAfterThreeAttemptsWithoutSavingThem() throws Exception {
+        var attempts = new ArrayList<Integer>();
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            attempts.add(lease.attempt());
+            return unfinished(lease, false);
+        }).when(client).generate(any());
+        String task = start(3);
+        var result = drain(task);
+        assertEquals(List.of(1, 2, 3), attempts);
+        assertEquals("FAILED", result.path("status").asText());
+        assertEquals("NO_VALID_QUESTIONS", result.path("errorCode").asText());
+        assertEquals(0, result.path("createdCount").asInt());
+        assertEquals(0, count("select count(*) from quiz_generation_candidates where task_id=?", task));
+        assertEquals(0, count("select count(*) from quiz_questions where company_id=?", company));
+    }
+
+    @Test
+    void enoughValidQuestionsFinishWithoutAnExtraRegenerationCall() throws Exception {
+        doAnswer(invocation -> unfinished(invocation.getArgument(0), true)).when(client).generate(any());
+        var result = drain(start(1));
+        assertEquals("SUCCEEDED", result.path("status").asText());
+        assertEquals(1, result.path("createdCount").asInt());
+        verify(client, times(1)).generate(any());
+    }
+
+    @Test
+    void exhaustedIncompleteBatchAdvancesToOtherSourceBatches() throws Exception {
+        addRecoverySections();
+        var attempts = new ArrayList<Lease>();
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            attempts.add(lease);
+            return lease.batchNo() == 0 ? unfinished(lease, false) : output(lease);
+        }).when(client).generate(any());
+        var result = drain(start(3));
+        assertEquals("SUCCEEDED", result.path("status").asText());
+        assertEquals(3, result.path("createdCount").asInt());
+        assertEquals(List.of(1, 2, 3), attempts.stream().filter(l -> l.batchNo() == 0).map(Lease::attempt).toList());
+        assertTrue(attempts.stream().filter(l -> l.batchNo() > 0).allMatch(l -> l.attempt() == 1));
+    }
+
+    private Output unfinished(Lease lease, boolean keepFirst) {
+        var base = output(lease);
+        for (int i = keepFirst ? 1 : 0; i < base.questions().size(); i++) {
+            ((tools.jackson.databind.node.ObjectNode) base.questions().get(i)).put("question", "무엇");
+        }
+        return base;
+    }
+
     private JsonNode drain(String task) throws Exception {
         for (int i = 0; i < 1000 && "PROCESSING".equals(repository.result(task).status()); i++) {
             allowClaim(); worker.runOnce();

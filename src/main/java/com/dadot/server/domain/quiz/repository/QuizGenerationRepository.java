@@ -195,7 +195,11 @@ public class QuizGenerationRepository {
         requireCreator(lease.userId());
         sources.validate(lease.companyId(), pinnedSources(lease.taskId()));
         int rejected = output.rejectedCount();
-        int ordinal = 0;
+        // 같은 배치의 재생성에서도 앞서 저장한 정상 후보 번호와 충돌하지 않는다.
+        int ordinal = (int) count("""
+                select coalesce(max(candidate_no), -1) + 1 from quiz_generation_candidates
+                where task_id = ? and batch_no = ?
+                """, lease.taskId(), lease.batchNo());
         for (var content : output.questions()) {
             String fingerprint = QuizGeneration.fingerprint(content.question());
             if (count("select count(*) from quiz_generation_candidates where task_id = ? and question_hash = ?",
@@ -210,11 +214,13 @@ public class QuizGenerationRepository {
                     """, lease.taskId(), lease.companyId(), lease.batchNo(), ordinal++, fingerprint, json(content));
         }
         completeRun(lease, metadata, null, now);
+        boolean enough = drafts.hasEnoughCandidates(lease);
+        boolean regenerate = output.incompleteCount() > 0 && lease.attempt() < 3 && !enough;
         jdbc.update("""
-                update quiz_generation_jobs set next_batch = next_batch + 1, attempt = 0,
+                update quiz_generation_jobs set next_batch = next_batch + ?, attempt = ?,
                     rejected_count = rejected_count + ? where task_id = ?
-                """, rejected, lease.taskId());
-        if (drafts.hasEnoughCandidates(lease) || lease.batchNo() + 1 == lease.batchCount()) {
+                """, regenerate ? 0 : 1, regenerate ? lease.attempt() : 0, rejected, lease.taskId());
+        if (enough || (!regenerate && lease.batchNo() + 1 == lease.batchCount())) {
             int created = drafts.saveDrafts(lease, now);
             finish(lease.taskId(), created, created == 0 ? "NO_VALID_QUESTIONS" : null, now);
         } else {

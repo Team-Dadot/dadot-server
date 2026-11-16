@@ -63,10 +63,21 @@ public class OpenAiQuizClient {
             해설은 공백 포함 50~90자 권장, 최대 120자다. 수치·전문 용어·무관한 배경을 덧붙이지 않는다.
             권장 길이를 채우려고 늘리지 않는다. 모든 길이는 공백·줄바꿈 포함 Unicode 코드 포인트 수다.
             질문·보기·해설은 상한 안에서 완결한다. 길면 전체를 다시 쓰고 문장 중간을 자르지 않는다.
+            질문은 '무엇인가요?', '어디인가요?', '어떤 특징이 있나요?' 등 완결된 존댓말로 끝낸다.
+            '무엇', '무엇인', '설명하', '어떤 것'처럼 단어나 어미 중간에서 끝내지 않는다.
+            먼저 질문의 끝까지 완성한 뒤 45자를 확인한다. 길면 배경을 덜어내고 질문 전체를 다시 쓴다.
             evidence는 1~3개이며 원문의 실제 연속 문자열을 공백까지 그대로 최대 250자 인용한다.
             근거 인용문은 요약하거나 쉬운 말로 고치지 않는다. 질문·해설과 원문 인용을 구분한다.
             source의 disclosureVersionId·sectionId를 그대로 사용한다. 공시명·URL·페이지를 생성하지 않는다.
             정답이 여러 보고서에 의존하면 각 보고서의 근거를 포함한다. 해설과 근거는 모순되면 안 된다.
+            """;
+
+    private static final String RETRY_INSTRUCTIONS = """
+            이번 공시 묶음은 재시도다. 끝이 잘린 질문을 그대로 반복하지 않는다.
+            신입이 이해할 쉬운 한 문장으로 질문을 새로 쓰고 반드시 45자 안에서 끝까지 완결한다.
+            '무엇인가요?', '어디인가요?', '어떤 특징이 있나요?'처럼 자연스러운 존댓말로 끝낸다.
+            길면 배경 설명부터 줄인다. 단어·어미 중간에서 자르거나 어려운 용어로 압축하지 않는다.
+            기존의 원문 근거·정답 하나·보기 4개·길이 규칙은 그대로 따른다.
             """;
 
     private final JsonMapper mapper;
@@ -98,10 +109,10 @@ public class OpenAiQuizClient {
 
     public String policyHash() {
         // Map 순회 순서에 영향을 받지 않아 재시작 후에도 같은 정책 해시를 만든다.
-        return QuizGeneration.sha256(QuizGeneration.PROMPT_VERSION + INSTRUCTIONS
-                + "schema-v1:q" + QuizGeneration.MAX_QUESTION_LENGTH
+        return QuizGeneration.sha256(QuizGeneration.PROMPT_VERSION + INSTRUCTIONS + RETRY_INSTRUCTIONS
+                + "schema-v2:question-unbounded:server-q" + QuizGeneration.MAX_QUESTION_LENGTH
                 + ":o" + QuizGeneration.MAX_OPTION_LENGTH
-                + ":e" + QuizGeneration.MAX_EXPLANATION_LENGTH + ":q250");
+                + ":e" + QuizGeneration.MAX_EXPLANATION_LENGTH + ":q250:complete-question-retry-v1");
     }
 
     public Output generate(Lease lease) {
@@ -111,7 +122,7 @@ public class OpenAiQuizClient {
                 "model", lease.model(), "store", false,
                 "reasoning", Map.of("effort", "none"),
                 "max_output_tokens", lease.maxOutputTokens(),
-                "instructions", INSTRUCTIONS,
+                "instructions", INSTRUCTIONS + (lease.attempt() > 1 ? "\n재시도 지침:\n" + RETRY_INSTRUCTIONS : ""),
                 "input", mapper.writeValueAsString(Map.of("maximumQuestions", lease.questionsPerBatch(),
                         "companyId", lease.companyId(), "sources", lease.input())),
                 "text", Map.of("format", Map.of("type", "json_schema", "name", "disclosure_quiz",
@@ -234,7 +245,7 @@ public class OpenAiQuizClient {
         var position = Map.<String, Object>of("type", "integer", "minimum", 1, "maximum", 4);
         var option = object(Map.of("position", position, "text", string(QuizGeneration.MAX_OPTION_LENGTH)));
         var evidence = object(Map.of("disclosureVersionId", id, "sectionId", id, "quote", string(250)));
-        return object(Map.of("questions", array(object(Map.of("question", string(QuizGeneration.MAX_QUESTION_LENGTH),
+        return object(Map.of("questions", array(object(Map.of("question", Map.of("type", "string", "minLength", 1),
                 "options", array(option, 4, 4), "correctOptionPosition", position,
                 "explanation", string(QuizGeneration.MAX_EXPLANATION_LENGTH), "evidence", array(evidence, 1, 3))), 0, maximum)));
     }

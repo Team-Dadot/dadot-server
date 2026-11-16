@@ -154,6 +154,10 @@ class QuizGenerationModelTest {
     void acceptsExactGeneratedLimitsWithoutTrimmingOrPadding(String field, int maximum) {
         for (String text : List.of("가".repeat(maximum), "😀".repeat(maximum),
                 "가 ".repeat(maximum / 2) + (maximum % 2 == 1 ? "가" : ""))) {
+            if ("question".equals(field)) {
+                String ending = "무엇인가요?";
+                text = text.substring(0, text.offsetByCodePoints(0, maximum - ending.length())) + ending;
+            }
             var value = generatedWith(field, text);
             var result = validateGenerated(value, "연구개발에 투자합니다.");
             assertEquals(0, result.rejectedCount());

@@ -337,6 +337,19 @@ class InterviewGenerationLengthRetryTest {
         assertEquals(metadata, recorded.metadata());
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 3})
+    void invalidInterpretationsUseTheExistingThreeAttemptBudget(int attempt) {
+        for (String reason : List.of("EVIDENCE_INTERPRETATION_REQUIRED", "EVIDENCE_INTERPRETATION_TOO_LONG",
+                "EVIDENCE_INTERPRETATION_INCOMPLETE", "EVIDENCE_INTERPRETATION_SENTENCES")) {
+            var metadata = new Metadata("interpretation-request", "gpt-6-luna", 30, 20);
+            Failure recorded = runFailure(attempt, new Failure("QUESTION_GENERATION_FAILED", false, 0, metadata, reason));
+            assertEquals(reason, recorded.reason());
+            assertEquals(attempt < 3, recorded.retryable());
+            assertEquals(metadata, recorded.metadata());
+        }
+    }
+
     private Failure problem(
             String question,
             long version,
@@ -367,7 +380,8 @@ class InterviewGenerationLengthRetryTest {
                                 Map.of(
                                         "disclosureVersionId", version,
                                         "sectionId", section,
-                                        "quote", quote
+                                        "quote", quote,
+                                        "interpretation", "공시에 나온 내용을 정리했어요. 해당 원문에서 확인할 수 있는 내용이에요."
                                 )
                         )
                 )

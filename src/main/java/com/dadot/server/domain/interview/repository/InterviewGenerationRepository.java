@@ -505,12 +505,12 @@ public class InterviewGenerationRepository {
         for (Quote quote : checked.evidence()) {
             jdbc.update("""
                     insert into interview_question_evidence(
-                        question_id, user_id, company_id, section_id, quotation
+                        question_id, user_id, company_id, section_id, quotation, interpretation
                     )
-                    values (?, ?, ?, ?, ?)
+                    values (?, ?, ?, ?, ?, ?)
                     """,
                     question, claim.userId(), claim.companyId(),
-                    quote.sectionId(), quote.quote()
+                    quote.sectionId(), quote.quote(), quote.interpretation()
             );
         }
 

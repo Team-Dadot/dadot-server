@@ -23,6 +23,7 @@ public final class InterviewGeneration {
     public static final ZoneId KST = ZoneId.of("Asia/Seoul");
     public static final String PROMPT_VERSION = "interview-generation-v1";
     public static final int MAX_QUESTION_LENGTH = 60;
+    public static final int MAX_INTERPRETATION_LENGTH = 180;
     // 존댓말 질문형·요청형을 폭넓게 허용한다. 검사만 하고 원문을 보정하거나 자르지 않는다.
     private static final Pattern QUESTION_ENDING =
             Pattern.compile("(?:요|까|십시오|바랍니다)[?？.。!！]?$");
@@ -117,7 +118,8 @@ public final class InterviewGeneration {
             boolean isSuperseded,
             LocalDate publishedAt,
             LocalDate periodStart,
-            LocalDate periodEnd
+            LocalDate periodEnd,
+            String interpretation
     ) {}
 
     public record Detail(
@@ -209,7 +211,12 @@ public final class InterviewGeneration {
             Integer outputTokens
     ) {}
 
-    public record Quote(long disclosureVersionId, long sectionId, String quote) {}
+    public record Quote(long disclosureVersionId, long sectionId, String quote, String interpretation) {
+        // 기존 데이터·저장 컨텍스트에 해석이 없는 경우의 호환 생성자.
+        public Quote(long disclosureVersionId, long sectionId, String quote) {
+            this(disclosureVersionId, sectionId, quote, null);
+        }
+    }
     public record Generated(String question, List<Quote> evidence) {}
     public record Output(Generated generated, Metadata metadata) {}
 
@@ -273,7 +280,7 @@ public final class InterviewGeneration {
         var ids = new HashSet<Long>();
 
         for (JsonNode item : evidence) {
-            fields(item, Set.of("disclosureVersionId", "sectionId", "quote"));
+            fields(item, Set.of("disclosureVersionId", "sectionId", "quote"), Set.of("interpretation"));
 
             long version = outputId(item.get("disclosureVersionId"));
             long section = outputId(item.get("sectionId"));
@@ -298,7 +305,10 @@ public final class InterviewGeneration {
                 throw invalidOutput("EVIDENCE_QUOTE_MISMATCH");
             }
 
-            checked.add(new Quote(version, section, quote));
+            JsonNode explanation = item.get("interpretation");
+            String interpretation = explanation == null || explanation.isNull()
+                    ? null : validateInterpretation(explanation);
+            checked.add(new Quote(version, section, quote, interpretation));
         }
 
         return new Generated(question, List.copyOf(checked));
@@ -309,7 +319,27 @@ public final class InterviewGeneration {
         if (!QUESTION_ENDING.matcher(generated.question().stripTrailing()).find()) {
             throw invalidOutput("QUESTION_INCOMPLETE");
         }
+        for (Quote evidence : generated.evidence()) {
+            if (evidence.interpretation() == null) {
+                throw invalidOutput("EVIDENCE_INTERPRETATION_REQUIRED");
+            }
+        }
         return generated;
+    }
+
+    private static String validateInterpretation(JsonNode value) {
+        String text = string(value, MAX_INTERPRETATION_LENGTH, "EVIDENCE_INTERPRETATION");
+        // 완결된 존댓말 뒤에서 나눈다. 소수점·영문 약어는 문장 경계로 세지 않는다.
+        String[] sentences = text.strip().split("(?<=[요다][.。])\\s*");
+        if (sentences.length > 2) {
+            throw invalidOutput("EVIDENCE_INTERPRETATION_SENTENCES");
+        }
+        for (String sentence : sentences) {
+            if (!sentence.matches("(?s).*(?:요|다)[.。]")) {
+                throw invalidOutput("EVIDENCE_INTERPRETATION_INCOMPLETE");
+            }
+        }
+        return text;
     }
 
     public static String fingerprint(String question) {
@@ -376,9 +406,17 @@ public final class InterviewGeneration {
     }
 
     public static void fields(JsonNode node, Set<String> names) {
-        if (node == null || !node.isObject() || node.size() != names.size()
-                || !node.propertyNames().containsAll(names)) {
+        fields(node, names, Set.of());
+    }
+
+    private static void fields(JsonNode node, Set<String> required, Set<String> optional) {
+        if (node == null || !node.isObject() || !node.propertyNames().containsAll(required)) {
             throw invalidOutput("JSON_STRUCTURE_INVALID");
+        }
+        for (String name : node.propertyNames()) {
+            if (!required.contains(name) && !optional.contains(name)) {
+                throw invalidOutput("JSON_STRUCTURE_INVALID");
+            }
         }
     }
 }

@@ -350,6 +350,84 @@ class InterviewGenerationIntegrationTest {
                 .andExpect(jsonPath("$.data.usage.canSubmit").value(false));
     }
 
+    @Test
+    void storesAndReturnsInterpretationWithoutChangingItsOriginalQuote() throws Exception {
+        String interpretation = "이 회사는 해외 판매망을 넓힐 계획이에요. 해외 고객에게 제품을 판매하는 내용이에요.";
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            Output base = output(lease);
+            Quote quote = base.generated().evidence().getFirst();
+            return new Output(new Generated(base.generated().question(), List.of(new Quote(
+                    quote.disclosureVersionId(), quote.sectionId(), quote.quote(), interpretation))), base.metadata());
+        }).when(client).generate(any());
+        String task = accepted();
+        worker.runOnce();
+        long question = question(task);
+        var stored = jdbc.queryForMap("select quotation, interpretation from interview_question_evidence where question_id = ?", question);
+        assertEquals(interpretation, stored.get("interpretation"));
+        detail(question, token).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.evidence[0].quote").value(stored.get("quotation")))
+                .andExpect(jsonPath("$.data.evidence[0].interpretation").value(interpretation));
+        detail(question, token).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.evidence[0].interpretation").value(interpretation));
+    }
+
+    @Test
+    void existingQuestionWithoutInterpretationKeepsItsOriginalEvidence() throws Exception {
+        long question = generatedQuestionForEvidence();
+        assertNull(jdbc.queryForObject("select interpretation from interview_question_evidence where question_id = ?", String.class, question));
+        String quote = jdbc.queryForObject("select quotation from interview_question_evidence where question_id = ?", String.class, question);
+        detail(question, token).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.evidence[0].quote").value(quote))
+                .andExpect(jsonPath("$.data.evidence[0].interpretation").isEmpty());
+    }
+
+    @Test
+    void interpretationsOfDifferentReportsStayWithTheirOwnQuotesAndSources() throws Exception {
+        long question = generatedQuestionForEvidence();
+        jdbc.update("update interview_question_evidence set interpretation = ? where question_id = ?",
+                "첫 번째 공시 내용을 정리했어요.", question);
+        jdbc.update("""
+                insert into interview_question_evidence(question_id, user_id, company_id, section_id, quotation, interpretation)
+                select ?, ?, ?, s.id, s.content_text, ? from disclosure_sections s
+                where s.company_id = ? and not exists(
+                    select 1 from interview_question_evidence e where e.question_id = ? and e.section_id = s.id)
+                order by s.id limit 1
+                """, question, user, company, "두 번째 공시 내용을 정리했어요.", company, question);
+        var expected = jdbc.queryForList("""
+                select e.quotation, e.interpretation, d.report_name, d.source_url
+                from interview_question_evidence e
+                join disclosure_sections s on s.id = e.section_id
+                join disclosure_versions v on v.id = s.disclosure_version_id
+                join disclosures d on d.id = v.disclosure_id
+                where e.question_id = ? order by e.section_id
+                """, question);
+        var evidence = data(detail(question, token).andExpect(status().isOk())).get("evidence");
+        assertEquals(2, evidence.size());
+        for (int i = 0; i < expected.size(); i++) {
+            assertEquals(expected.get(i).get("quotation"), evidence.get(i).get("quote").asString());
+            assertEquals(expected.get(i).get("interpretation"), evidence.get(i).get("interpretation").asString());
+            assertEquals(expected.get(i).get("report_name"), evidence.get(i).get("reportTitle").asString());
+            assertEquals(expected.get(i).get("source_url"), evidence.get(i).get("sourceUrl").asString());
+        }
+    }
+
+    @Test
+    void invalidInterpretationDoesNotCreateAQuestionOrEvidenceRow() throws Exception {
+        doAnswer(invocation -> {
+            Output base = output(invocation.getArgument(0));
+            Quote quote = base.generated().evidence().getFirst();
+            return new Output(new Generated(base.generated().question(), List.of(new Quote(
+                    quote.disclosureVersionId(), quote.sectionId(), quote.quote(), "이 회사는 해외에서"))), base.metadata());
+        }).when(client).generate(any());
+        String task = accepted();
+        worker.runOnce();
+        assertEquals(0, count("select count(*) from interview_questions where generation_task_id = ?", task));
+        assertEquals(0, count("select count(*) from interview_question_evidence where company_id = ?", company));
+        assertEquals("QUESTION_GENERATION_FAILED", jdbc.queryForObject(
+                "select last_error_code from ai_tasks where id = ?", String.class, task));
+    }
+
     private long generatedQuestionForEvidence() throws Exception {
         String task = accepted();
         worker.runOnce();

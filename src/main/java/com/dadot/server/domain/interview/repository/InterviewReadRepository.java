@@ -294,7 +294,7 @@ public class InterviewReadRepository {
                              select 1 from disclosures c
                              where c.corrects_disclosure_id = d.id
                          ),
-                       d.disclosed_on, d.period_start, d.period_end
+                       d.disclosed_on, d.period_start, d.period_end, e.interpretation
                 from interview_question_evidence e
                 join disclosure_sections s on s.id = e.section_id
                 join disclosure_versions v on v.id = s.disclosure_version_id
@@ -308,7 +308,7 @@ public class InterviewReadRepository {
                         rs.getBoolean(7),
                         rs.getObject(8, LocalDate.class),
                         rs.getObject(9, LocalDate.class),
-                        rs.getObject(10, LocalDate.class)
+                        rs.getObject(10, LocalDate.class), rs.getString(11)
                 ),
                 id
         );

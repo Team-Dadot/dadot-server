@@ -67,11 +67,22 @@ public class OpenAiInterviewClient {
             evidence 1~3개를 반환한다. 질문의 기업 사실·사업 맥락과 직접 관련된 연속 원문을 공백까지 그대로 최대 500자 인용한다.
             관련 없는 공시를 형식적으로 붙이지 않는다. 원문 인용을 요약·해설로 바꾸지 않는다.
             disclosureVersionId와 sectionId는 입력값만 사용한다. 질문에 세 보고서 모두를 억지로 인용하지 않는다.
-            출력은 question과 evidence만 포함한다. 정답·예시 답변·점수·공시 요약·평가 피드백을 생성하지 않는다.
+            각 evidence에 interpretation을 추가한다. 이는 그 evidence의 quote만 쉽게 풀어 쓴 공시 내용 요약이다.
+            interpretation은 해당 quote에서 확인되는 핵심 사실을 쉬운 존댓말 2문장으로 설명한다.
+            원문 정보가 짧으면 같은 말을 억지로 늘리거나 새 사실을 보태지 말고 1문장으로 작성해도 된다.
+            해석 전체는 공백·줄바꿈 포함 80~140자 권장, 최대 180자다. 권장 최소 길이는 강제하지 않는다.
+            어려운 회계·법률·기술 용어, 긴 수치 나열을 피한다. 전문 지식 없이 읽을 수 있는 말로 정리한다.
+            다른 evidence·공시·경험의 사실을 섞지 않는다. quote에 없는 정의·전망·평가·인과관계는 추가하지 않는다.
+            계획·목표·전망·완료 여부와 대상·기간·단위·부정 표현을 원문 그대로 구분한다.
+            질문의 답이나 지원자가 해야 할 말, 직무 기여 방안, 점수·합격 조언은 interpretation에 쓰지 않는다.
+            제목·목록·마크다운 없이 설명문만 쓴다. 각 문장은 '있어요.', '계획이에요.', '내용입니다.' 등으로 완결한다.
+            180자를 넘으면 전체를 다시 써서 줄인다. 문장 중간을 자르지 않는다. quote는 원문 그대로 유지한다.
+            출력은 question과 evidence만 포함한다. 정답·예시 답변·점수·평가 피드백을 생성하지 않는다.
             """;
 
     private static final String RETRY_INSTRUCTIONS = """
-            이번 요청은 재시도다. 길이 초과나 미완결 문장을 피하도록 질문 전체를 새로 작성한다.
+            이번 요청은 재시도다. 길이 초과나 미완결 문장을 피하도록 질문과 근거 해석을 전체적으로 다시 작성한다.
+            각 interpretation도 해당 quote에만 근거해 최대 180자, 완결된 설명문 1~2개로 작성한다.
             질문은 신입 수준의 쉬운 존댓말 한 문장으로 공백 포함 20~40자 권장, 반드시 최대 60자 안에서 완성한다.
             질문을 먼저 완결한 다음 길이를 확인한다. 길면 배경 설명부터 줄이고 문장 중간을 자르지 않는다.
             '무엇인가요?', '생각하시나요?', '말해 주세요.', '설명해 보세요.', '말씀해 주십시오.' 등으로 자연스럽게 끝낸다.
@@ -130,7 +141,7 @@ public class OpenAiInterviewClient {
                 InterviewGeneration.PROMPT_VERSION
                         + INSTRUCTIONS + RETRY_INSTRUCTIONS + rules
                         + "schema-v2:question-unbounded:server-q" + InterviewGeneration.MAX_QUESTION_LENGTH
-                        + ":length-ending-retry-v2:quote500:low:4096"
+                        + ":length-ending-retry-v2:quote500:interpretation180-v1:low:4096"
         );
     }
 
@@ -445,7 +456,8 @@ public class OpenAiInterviewClient {
         var evidence = object(Map.of(
                 "disclosureVersionId", id,
                 "sectionId", id,
-                "quote", string(500)
+                "quote", string(500),
+                "interpretation", Map.of("type", "string", "minLength", 1)
         ));
 
         return object(Map.of(

@@ -185,7 +185,8 @@ class InterviewGenerationModelTest {
         return mapper.readTree(mapper.writeValueAsString(java.util.Map.of(
                 "question", question,
                 "evidence", List.of(java.util.Map.of(
-                        "disclosureVersionId", 20, "sectionId", 10, "quote", quote)))));
+                        "disclosureVersionId", 20, "sectionId", 10, "quote", quote,
+                        "interpretation", "공시에 나온 내용을 정리했어요. 해당 원문에서 확인할 수 있는 내용이에요.")))));
     }
 
     @Test

@@ -51,7 +51,8 @@ class OpenAiInterviewClientTest {
                           "evidence":[{
                             "disclosureVersionId":2,
                             "sectionId":1,
-                            "quote":"해외 판매"
+                            "quote":"해외 판매",
+                            "interpretation":"이 회사는 해외에서 제품을 판매해요. 해외 고객에게 판매하는 내용이에요."
                           }]
                         }
                         """
@@ -175,6 +176,13 @@ class OpenAiInterviewClientTest {
                         .asInt()
         );
 
+        assertEquals("이 회사는 해외에서 제품을 판매해요. 해외 고객에게 판매하는 내용이에요.",
+                output.generated().evidence().getFirst().interpretation());
+        JsonNode interpretation = schema.path("properties").path("evidence").path("items")
+                .path("properties").path("interpretation");
+        assertEquals("string", interpretation.path("type").asText());
+        assertFalse(interpretation.has("maxLength"));
+
         String instructions = request.get()
                 .path("instructions")
                 .asText();
@@ -204,7 +212,8 @@ class OpenAiInterviewClientTest {
                                                 Map.of(
                                                         "disclosureVersionId", 2,
                                                         "sectionId", 1,
-                                                        "quote", "해외 판매"
+                                                        "quote", "해외 판매",
+                                                        "interpretation", "이 회사는 해외에서 제품을 판매해요. 해외 고객에게 판매하는 내용이에요."
                                                 )
                                         )
                                 )
@@ -497,6 +506,30 @@ class OpenAiInterviewClientTest {
         assertEquals(0, requestCount.get());
     }
 
+    @Test
+    void newProviderResponsesMustIncludeACompleteBoundedInterpretation() {
+        for (String text : List.of("이 회사는 해외에서", "가".repeat(181),
+                "해외에서 판매해요. 고객에게 공급해요. 제품을 판매해요.")) {
+            var envelope = mapper.readTree(body);
+            var content = (tools.jackson.databind.node.ObjectNode) envelope.path("output").get(0).path("content").get(0);
+            var generated = mapper.readTree(content.path("text").asText());
+            ((tools.jackson.databind.node.ObjectNode) generated.path("evidence").get(0)).put("interpretation", text);
+            content.put("text", mapper.writeValueAsString(generated));
+            body = mapper.writeValueAsString(envelope);
+            Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
+            assertTrue(failure.reason().startsWith("EVIDENCE_INTERPRETATION_"));
+            assertEquals("test-request", failure.metadata().requestId());
+            assertEquals(20, failure.metadata().outputTokens());
+        }
+        var envelope = mapper.readTree(body);
+        var content = (tools.jackson.databind.node.ObjectNode) envelope.path("output").get(0).path("content").get(0);
+        var generated = mapper.readTree(content.path("text").asText());
+        ((tools.jackson.databind.node.ObjectNode) generated.path("evidence").get(0)).remove("interpretation");
+        content.put("text", mapper.writeValueAsString(generated));
+        body = mapper.writeValueAsString(envelope);
+        assertEquals("EVIDENCE_INTERPRETATION_REQUIRED", assertThrows(Failure.class, () -> client.generate(lease())).reason());
+    }
+
     private Lease lease() {
         return lease(1);
     }
@@ -545,7 +578,8 @@ class OpenAiInterviewClientTest {
                                                 Map.of(
                                                         "disclosureVersionId", 2,
                                                         "sectionId", 1,
-                                                        "quote", "해외 판매"
+                                                        "quote", "해외 판매",
+                                                        "interpretation", "이 회사는 해외에서 제품을 판매해요. 해외 고객에게 판매하는 내용이에요."
                                                 )
                                         )
                                 )

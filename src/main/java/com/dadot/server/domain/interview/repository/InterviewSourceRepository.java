@@ -148,9 +148,8 @@ public class InterviewSourceRepository {
 
         List<Section> selected = planner.select(reports, job, materials);
 
-        if (pinned.stream().anyMatch(s -> selected.stream().noneMatch(
-                x -> x.disclosureVersionId() == s.versionId()
-        ))) {
+        // 공시 3종의 버전 고정은 유지하되, 적격하지 않은 보고서에서 문단을 억지로 뽑지 않는다.
+        if (selected.isEmpty()) {
             throw new BusinessException(ErrorCode.CONTENT_UNAVAILABLE);
         }
 

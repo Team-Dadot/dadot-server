@@ -428,6 +428,33 @@ class InterviewGenerationIntegrationTest {
                 "select last_error_code from ai_tasks where id = ?", String.class, task));
     }
 
+    @Test
+    void accountingBoilerplateOnlyIsRejectedBeforeCreatingATaskOrCallingAi() throws Exception {
+        jdbc.update("update disclosure_sections set heading=?, content_text=? where company_id=?",
+                "연결재무제표 작성기준", "보고기간말 경영진의 판단에 따른 추정치와 가정은 실제 결과와 다를 수 있습니다.", company);
+        create(key(), token).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("CONTENT_UNAVAILABLE"));
+        assertEquals(0, count("select count(*) from ai_tasks where company_id=?", company));
+        verify(client, never()).generate(any());
+    }
+
+    @Test
+    void canUseOneBusinessReportWithoutAddingBoilerplateFromTheOtherTwo() throws Exception {
+        long annual = count("""
+                select v.id from disclosure_versions v join disclosures d on d.id=v.disclosure_id
+                where d.company_id=? and d.report_type='ANNUAL'
+                """, company);
+        jdbc.update("update disclosure_sections set heading=?, content_text=? where company_id=? and disclosure_version_id<>?",
+                "연결재무제표 작성기준", "보고기간말 추정치와 가정은 실제 결과와 다를 수 있습니다.", company, annual);
+        String task = accepted();
+        worker.runOnce();
+        assertEquals(3, captured.get().input().sources().size());
+        assertEquals(1, captured.get().input().sections().size());
+        assertEquals(annual, captured.get().input().sections().getFirst().disclosureVersionId());
+        detail(question(task), token).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.evidence.length()").value(1));
+    }
+
     private long generatedQuestionForEvidence() throws Exception {
         String task = accepted();
         worker.runOnce();

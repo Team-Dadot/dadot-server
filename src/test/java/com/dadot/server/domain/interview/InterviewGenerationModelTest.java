@@ -190,7 +190,7 @@ class InterviewGenerationModelTest {
     }
 
     @Test
-    void plannerScansEachReportAndKeepsOriginalAdjacentContext() {
+    void plannerScansBusinessReportsButExcludesFinancialAdjacentContext() {
         var reports = List.of(
                 List.of(
                         new Section(1, 1, "재무", "단위: 백만원"),
@@ -211,7 +211,7 @@ class InterviewGenerationModelTest {
                         .distinct().count()
         );
 
-        assertTrue(selected.contains(reports.getFirst().getFirst()));
+        assertFalse(selected.contains(reports.getFirst().getFirst()));
 
         assertEquals(
                 "해외 채널 확대",

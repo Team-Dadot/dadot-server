@@ -47,7 +47,7 @@ class OpenAiInterviewClientTest {
                         "text",
                         """
                         {
-                          "question":"해외영업 전략을 설명해 주세요.",
+                          "question":"우리 회사에 지원한 이유는 무엇인가요?",
                           "evidence":[{
                             "disclosureVersionId":2,
                             "sectionId":1,
@@ -233,12 +233,12 @@ class OpenAiInterviewClientTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-            "어떤 전략이 필요할까요?",
-            "공급 지연에 어떻게 대응하나요?",
-            "비용과 품질 중 무엇을 우선할 것인가요?",
-            "품질과 납기를 함께 개선할 방안을 설명해 보세요.",
-            "인재 확보 방안을 제안해 보십시오.",
-            "어떤 점을 먼저 배우고 싶나요?"
+            "우리 회사에 지원한 이유는 무엇인가요?",
+            "우리 회사를 선택한 계기를 말해 주세요.",
+            "우리 회사에 관심을 가진 이유를 설명해 보세요.",
+            "우리 회사에 지원한 동기를 말씀해 주십시오.",
+            "왜 우리 회사에 지원했나요?",
+            "우리 회사를 선택한 이유를 설명해주세요"
     })
     void acceptsDifferentEndingsWithoutRegeneration(String question) {
         body = questionResponse(question);
@@ -390,7 +390,7 @@ class OpenAiInterviewClientTest {
     @ParameterizedTest
     @ValueSource(strings = {"가", "🙂"})
     void completeQuestionAt60CodePointsIsNotTruncated(String character) {
-        String ending = "어떻게 대응하나요?";
+        String ending = "지원한 이유는 무엇인가요?";
         String question = character.repeat(
                 60 - ending.codePointCount(0, ending.length())
         ) + ending;
@@ -406,7 +406,7 @@ class OpenAiInterviewClientTest {
 
     @Test
     void serverRejectsOver60RatherThanTruncatingToFitSchema() {
-        String ending = "어떻게 대응하나요?";
+        String ending = "지원한 이유는 무엇인가요?";
         String question = "가".repeat(
                 61 - ending.codePointCount(0, ending.length())
         ) + ending;
@@ -528,6 +528,51 @@ class OpenAiInterviewClientTest {
         content.put("text", mapper.writeValueAsString(generated));
         body = mapper.writeValueAsString(envelope);
         assertEquals("EVIDENCE_INTERPRETATION_REQUIRED", assertThrows(Failure.class, () -> client.generate(lease())).reason());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "'입사 후 어떤 일을 해보고 싶나요?',QUESTION_POLICY_CORE_MISMATCH",
+            "'영업 직무에 지원한 이유는 무엇인가요?',QUESTION_POLICY_JOB_NAME",
+            "'사업 확대를 고려해 우리 회사에 지원한 이유는 무엇인가요?',QUESTION_POLICY_FORCED_BRIDGE",
+            "'경쟁사보다 우리 회사에 지원한 이유는 무엇인가요?',QUESTION_POLICY_UNSUPPORTED_CONTEXT"
+    })
+    void rejectsQuestionsOutsideTheSelectedCoreWithProviderMetadata(String question, String reason) {
+        body = questionResponse(question);
+        var failure = assertThrows(Failure.class, () -> client.generate(lease()));
+        assertEquals(reason, failure.reason());
+        assertEquals("test-request", failure.metadata().requestId());
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void sendsTheSelectedCoreAndExcludesBoilerplateBeforeTheProviderCall() {
+        var base = lease();
+        var original = base.input();
+        var bad = new Section(9, 9, "연결재무제표 작성기준", "보고기간말 추정치와 가정은 실제 결과와 다를 수 있습니다.");
+        var input = new Input(original.companyName(), original.job(), original.sources(),
+                List.of(original.sections().getFirst(), bad), original.experiences(), original.previousQuestions());
+        var value = new Lease(base.taskId(), base.userId(), base.companyId(), base.contextId(), base.policyVersionId(),
+                base.owner(), base.fence(), base.runId(), base.attempt(), base.model(), base.promptHash(), base.rules(), input);
+        client.generate(value);
+        var actual = mapper.readTree(request.get().path("input").asText());
+        assertEquals(1, actual.path("sections").size());
+        assertEquals(1, actual.path("sections").get(0).path("sectionId").asInt());
+        assertEquals("회사 지원동기", actual.path("coreQuestion").path("type").asText());
+        assertEquals("우리 회사에 지원한 이유는 무엇인가요?", actual.path("coreQuestion").path("question").asText());
+    }
+
+    @Test
+    void noSuitableBusinessSectionStopsBeforeAnyPaidRequest() {
+        var base = lease();
+        var old = base.input();
+        var input = new Input(old.companyName(), old.job(), old.sources(), List.of(new Section(9, 9,
+                "재무제표 작성기준", "보고기간말 추정치와 가정은 실제 결과와 다를 수 있습니다.")),
+                old.experiences(), old.previousQuestions());
+        var value = new Lease(base.taskId(), base.userId(), base.companyId(), base.contextId(), base.policyVersionId(),
+                base.owner(), base.fence(), base.runId(), base.attempt(), base.model(), base.promptHash(), base.rules(), input);
+        assertEquals("CONTENT_UNAVAILABLE", assertThrows(Failure.class, () -> client.generate(value)).code());
+        assertEquals(0, requestCount.get());
     }
 
     private Lease lease() {

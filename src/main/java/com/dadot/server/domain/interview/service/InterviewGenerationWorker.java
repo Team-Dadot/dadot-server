@@ -109,6 +109,7 @@ public class InterviewGenerationWorker {
                     ex.retryable()
                             || "QUESTION_TOO_LONG".equals(reason)
                             || "QUESTION_INCOMPLETE".equals(reason)
+                            || reason.startsWith("QUESTION_POLICY_")
                             || reason.startsWith("EVIDENCE_INTERPRETATION_")
             );
 

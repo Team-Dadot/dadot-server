@@ -13,7 +13,7 @@ import java.util.Locale;
 public class InterviewSourcePlanner {
     private record Ranked(Section section, int rank) {}
 
-    // 모든 저장 절을 점수화한다. 모델에는 관련 절과 인접 문맥을 제공한다.
+    // 사업 정보로 적격한 절만 점수화하며, 인접 문맥에도 같은 제외 규칙을 적용한다.
     public List<Section> select(
             List<List<Section>> reports,
             String jobName,
@@ -38,6 +38,7 @@ public class InterviewSourcePlanner {
 
         for (List<Section> report : reports) {
             var ranked = report.stream()
+                    .filter(InterviewQuestionPolicy::eligible)
                     .map(s -> new Ranked(s, rank(s, terms)))
                     .sorted(
                             Comparator.comparingInt(Ranked::rank).reversed()
@@ -59,7 +60,8 @@ public class InterviewSourcePlanner {
 
                     Section section = report.get(i);
 
-                    if (included.contains(section.sectionId())
+                    if (!InterviewQuestionPolicy.eligible(section)
+                            || included.contains(section.sectionId())
                             || characters + section.content().length() > 16_384) {
                         continue;
                     }

@@ -20,6 +20,10 @@ import java.util.regex.Pattern;
 
 public final class QuizGeneration {
     public static final String PROMPT_VERSION = "quiz-bank-v1";
+    // 새 AI 생성 문항에만 적용한다. 기존 문제은행의 저장·조회 계약은 유지한다.
+    public static final int MAX_QUESTION_LENGTH = 45;
+    public static final int MAX_OPTION_LENGTH = 20;
+    public static final int MAX_EXPLANATION_LENGTH = 120;
     private static final Pattern NORMALIZE = Pattern.compile("[\\p{Z}\\s\\p{P}]+");
     private static final Pattern OPTION_WHITESPACE = Pattern.compile("[\\p{Z}\\s]+");
     private static final Pattern OPTION_PUNCTUATION = Pattern.compile(
@@ -101,11 +105,11 @@ public final class QuizGeneration {
                 object.put("companyId", companyId);
                 var content = QuizBank.Content.parse(object);
                 if (content.evidence().size() > 3) throw QuizBank.invalid();
-                validText(content.question(), 60);
-                validText(content.explanation(), 300);
+                validText(content.question(), MAX_QUESTION_LENGTH);
+                validText(content.explanation(), MAX_EXPLANATION_LENGTH);
                 var options = new HashSet<String>();
                 for (var option : content.options()) {
-                    validText(option.text(), 30);
+                    validText(option.text(), MAX_OPTION_LENGTH);
                     if (!options.add(normalizeOption(option.text()))) throw QuizBank.invalid();
                 }
                 boolean primaryEvidence = false;

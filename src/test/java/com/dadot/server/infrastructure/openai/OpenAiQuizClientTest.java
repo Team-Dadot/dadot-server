@@ -1,5 +1,6 @@
 package com.dadot.server.infrastructure.openai;
 
+import com.dadot.server.domain.quiz.model.QuizGeneration;
 import com.dadot.server.domain.quiz.model.QuizGeneration.*;
 import com.dadot.server.domain.quiz.support.QuizGenerationProperties;
 import com.sun.net.httpserver.HttpServer;
@@ -7,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -82,6 +84,19 @@ class OpenAiQuizClientTest {
         assertTrue(request.path("text").path("format").path("strict").asBoolean());
         assertFalse(request.toString().contains("test-key"));
         assertEquals("Bearer " + "test-key-".repeat(4), authorization.get());
+        var questions = request.path("text").path("format").path("schema")
+                .path("properties").path("questions");
+        assertEquals(0, questions.path("minItems").asInt());
+        assertEquals(3, questions.path("maxItems").asInt());
+        var fields = questions.path("items").path("properties");
+        assertEquals(45, fields.path("question").path("maxLength").asInt());
+        assertEquals(120, fields.path("explanation").path("maxLength").asInt());
+        assertEquals(4, fields.path("options").path("minItems").asInt());
+        assertEquals(4, fields.path("options").path("maxItems").asInt());
+        assertEquals(20, fields.path("options").path("items").path("properties")
+                .path("text").path("maxLength").asInt());
+        assertEquals(250, fields.path("evidence").path("items").path("properties")
+                .path("quote").path("maxLength").asInt());
     }
 
     @ParameterizedTest
@@ -178,6 +193,36 @@ class OpenAiQuizClientTest {
                 0, 1, 3, 1, 3, 4096, old.model(), "old-policy", old.input());
         assertEquals("AI_POLICY_CHANGED", assertThrows(Failure.class, () -> client.generate(stale)).code());
         assertNull(received.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"question,46", "option,21", "explanation,121"})
+    void rejectsOversizedGeneratedItemButKeepsItsValidSibling(String field, int length) {
+        var valid = mapper.valueToTree(Map.of(
+                "question", "이 회사가 투자하는 분야는 무엇인가요?",
+                "options", List.of(Map.of("position", 1, "text", "연구개발"),
+                        Map.of("position", 2, "text", "판매망"), Map.of("position", 3, "text", "생산시설"),
+                        Map.of("position", 4, "text", "물류시설")),
+                "correctOptionPosition", 1, "explanation", "이 회사는 연구개발에 투자하고 있어요.",
+                "evidence", List.of(Map.of("sectionId", 1, "disclosureVersionId", 1,
+                        "quote", "연구개발에 투자합니다."))));
+        var oversized = (tools.jackson.databind.node.ObjectNode) valid.deepCopy();
+        if ("option".equals(field)) {
+            ((tools.jackson.databind.node.ObjectNode) oversized.path("options").get(0))
+                    .put("text", "가".repeat(length));
+        } else oversized.put(field, "가".repeat(length));
+        body = response("completed", Map.of("type", "output_text", "text",
+                mapper.writeValueAsString(Map.of("questions", List.of(oversized, valid)))));
+        var lease = lease(client);
+        var output = client.generate(lease);
+        var checked = QuizGeneration.validate(output.questions(), lease.companyId(), lease.input(),
+                lease.questionsPerBatch());
+        assertEquals(1, checked.rejectedCount());
+        assertEquals(1, checked.questions().size());
+        assertEquals(valid.path("question").asText(), checked.questions().getFirst().question());
+        assertEquals(valid.path("options").get(0).path("text").asText(),
+                checked.questions().getFirst().options().getFirst().text());
+        assertEquals(valid.path("explanation").asText(), checked.questions().getFirst().explanation());
     }
 
     private OpenAiQuizClient client(Duration timeout) {

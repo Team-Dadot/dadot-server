@@ -149,6 +149,77 @@ class QuizGenerationModelTest {
         assertFalse(properties.toString().contains("secret-"));
     }
 
+    @ParameterizedTest
+    @CsvSource({"question,45", "option,20", "explanation,120"})
+    void acceptsExactGeneratedLimitsWithoutTrimmingOrPadding(String field, int maximum) {
+        for (String text : List.of("가".repeat(maximum), "😀".repeat(maximum),
+                "가 ".repeat(maximum / 2) + (maximum % 2 == 1 ? "가" : ""))) {
+            var value = generatedWith(field, text);
+            var result = validateGenerated(value, "연구개발에 투자합니다.");
+            assertEquals(0, result.rejectedCount());
+            assertEquals(1, result.questions().size());
+            var accepted = result.questions().getFirst();
+            String actual = switch (field) {
+                case "question" -> accepted.question();
+                case "option" -> accepted.options().getFirst().text();
+                default -> accepted.explanation();
+            };
+            assertEquals(text, actual);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"question,46", "option,21", "explanation,121"})
+    void rejectsOneCodePointOverTheGeneratedLimit(String field, int length) {
+        for (String character : List.of("가", "😀")) {
+            var value = generatedWith(field, character.repeat(length));
+            var result = validateGenerated(value, "연구개발에 투자합니다.");
+            assertTrue(result.questions().isEmpty());
+            assertEquals(1, result.rejectedCount());
+            String actual = "option".equals(field) ? value.path("options").get(0).path("text").asText()
+                    : value.path(field).asText();
+            assertEquals(character.repeat(length), actual);
+        }
+    }
+
+    @Test
+    void retainsTheOriginalQuoteLimitAndExactText() {
+        String quote = "원".repeat(250);
+        var value = mapper.valueToTree(question(1, 1, quote));
+        var result = validateGenerated(value, quote);
+        assertEquals(1, result.questions().size());
+        assertEquals(quote, result.questions().getFirst().evidence().getFirst().quote());
+        var tooLong = mapper.valueToTree(question(1, 1, quote + "문"));
+        assertEquals(1, validateGenerated(tooLong, quote + "문").rejectedCount());
+    }
+
+    @Test
+    void keepsTheBankContentContractForPreviouslyStoredOrManualQuestions() {
+        var value = generatedWith("question", "가".repeat(60));
+        value.put("companyId", 5);
+        value.put("explanation", "나".repeat(300));
+        ((tools.jackson.databind.node.ObjectNode) value.path("options").get(0))
+                .put("text", "다".repeat(30));
+        var content = com.dadot.server.domain.quiz.model.QuizBank.Content.parse(value);
+        assertEquals(60, content.question().codePointCount(0, content.question().length()));
+        assertEquals(300, content.explanation().length());
+        assertEquals(30, content.options().getFirst().text().length());
+    }
+
+    private tools.jackson.databind.node.ObjectNode generatedWith(String field, String text) {
+        var value = (tools.jackson.databind.node.ObjectNode) mapper.valueToTree(
+                question(1, 1, "연구개발에 투자합니다."));
+        if ("option".equals(field)) {
+            ((tools.jackson.databind.node.ObjectNode) value.path("options").get(0)).put("text", text);
+        } else value.put(field, text);
+        return value;
+    }
+
+    private Validated validateGenerated(tools.jackson.databind.JsonNode value, String source) {
+        return QuizGeneration.validate(mapper.createArrayNode().add(value), 5,
+                new Input(List.of(section(1, 1, source)), List.of()), 1);
+    }
+
     private Validated validateOptions(String first, String second) {
         var value = (tools.jackson.databind.node.ObjectNode) mapper.valueToTree(
                 question(1, 1, "연구개발에 투자합니다."));

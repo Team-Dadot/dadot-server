@@ -76,24 +76,24 @@ class InterviewGenerationModelTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 49, 50, 80, 99, 100})
-    void questionLengthAcceptsUpTo100CodePointsWithoutForcingRecommendedMinimum(int length) {
+    @ValueSource(ints = {1, 19, 20, 40, 59, 60})
+    void questionLengthAcceptsUpTo60CodePointsWithoutForcingRecommendedMinimum(int length) {
         String question = "가".repeat(length);
         assertEquals(question, InterviewGeneration.validate(lengthOutput(question, "근거"),
                 lengthInput("근거")).question());
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {101, 140, 160, 500})
-    void questionLongerThan100IsRejectedRatherThanTruncated(int length) {
+    @ValueSource(ints = {61, 80, 100, 500})
+    void questionLongerThan60IsRejectedRatherThanTruncated(int length) {
         assertThrows(Failure.class, () -> InterviewGeneration.validate(
                 lengthOutput("가".repeat(length), "근거"), lengthInput("근거")));
     }
 
     @Test
     void questionLengthCountsSpacesAndSupplementaryCodePoints() {
-        String question = "가 ".repeat(49) + "🙂?";
-        assertEquals(100, question.codePointCount(0, question.length()));
+        String question = "가 ".repeat(29) + "🙂?";
+        assertEquals(60, question.codePointCount(0, question.length()));
         assertEquals(question, InterviewGeneration.validate(lengthOutput(question, "근거"),
                 lengthInput("근거")).question());
         assertThrows(Failure.class, () -> InterviewGeneration.validate(
@@ -130,22 +130,50 @@ class InterviewGenerationModelTest {
 
     @Test
     void doesNotRejectOrModifyQuestionBasedOnItsEnding() {
-        String question = "삼진제약은 후보물질 탐색부터 임상 1상까지 다양한 연구개발을 진행하고 있습니다. "
-                + "인사 담당자로서 이러한 연구개발 조직의 특성을 고려해 인재를 확보하고 유지하려면 어떤 점을 우선하겠";
-        assertEquals(100, question.codePointCount(0, question.length()));
+        String question = "이 직무에서 새 업무를 배울 때 어떤 점을 먼저 확인하겠";
+        assertTrue(question.codePointCount(0, question.length()) <= 60);
         assertEquals(question, InterviewGeneration.validate(
                 lengthOutput(question, "근거"), lengthInput("근거")).question());
     }
 
     @Test
-    void naturalQuestionMustStillFitWithin100CodePoints() {
+    void naturalQuestionMustStillFitWithin60CodePoints() {
         String ending = "어떤 전략이 필요할까요?";
-        String question = "가".repeat(100 - ending.codePointCount(0, ending.length())) + ending;
+        String question = "가".repeat(60 - ending.codePointCount(0, ending.length())) + ending;
         assertEquals(question, InterviewGeneration.validate(
                 lengthOutput(question, "근거"), lengthInput("근거")).question());
         assertEquals("QUESTION_GENERATION_FAILED", assertThrows(Failure.class,
                 () -> InterviewGeneration.validate(lengthOutput("가" + question, "근거"),
                         lengthInput("근거"))).code());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "이 회사의 제품 중 무엇이 궁금한가요?",
+            "이 직무를 선택한 이유는 무엇입니까?",
+            "어떤 점부터 배우고 싶나요?",
+            "협업에서 무엇이 중요할까요?",
+            "처음 해본 일을 배운 경험을 말해 주세요.",
+            "팀에서 맡은 역할을 설명해 보세요.",
+            "관심을 갖게 된 계기를 말씀해 주십시오.",
+            "배운 경험을 소개해 주시기 바랍니다.",
+            "경험을 설명해주세요",
+            "어떤 점이 궁금하신가요？"
+    })
+    void acceptsCompleteQuestionsAndRequestsWithoutModifyingThem(String question) {
+        var generated = InterviewGeneration.validate(lengthOutput(question, "근거"), lengthInput("근거"));
+        assertSame(generated, InterviewGeneration.validateComplete(generated));
+        assertEquals(question, generated.question());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"무엇", "이 회사의 주요 제품은 무엇", "어떤 점을 우선하겠", "말해 주", "설명해 보세",
+            "이 직무에서 필요한 것은 무엇?", "궁금한 점은 무엇입니", "?"})
+    void rejectsUnfinishedNewAiQuestionsRatherThanCompletingThemByGuessing(String question) {
+        var generated = InterviewGeneration.validate(lengthOutput(question, "근거"), lengthInput("근거"));
+        var failure = assertThrows(Failure.class, () -> InterviewGeneration.validateComplete(generated));
+        assertEquals("QUESTION_INCOMPLETE", failure.reason());
+        assertEquals(question, generated.question());
     }
 
     private Input lengthInput(String source) {

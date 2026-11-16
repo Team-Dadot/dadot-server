@@ -108,6 +108,7 @@ public class InterviewGenerationWorker {
                     && (
                     ex.retryable()
                             || "QUESTION_TOO_LONG".equals(reason)
+                            || "QUESTION_INCOMPLETE".equals(reason)
             );
 
             Failure failure = new Failure(

@@ -17,10 +17,15 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 public final class InterviewGeneration {
     public static final ZoneId KST = ZoneId.of("Asia/Seoul");
     public static final String PROMPT_VERSION = "interview-generation-v1";
+    public static final int MAX_QUESTION_LENGTH = 60;
+    // 존댓말 질문형·요청형을 폭넓게 허용한다. 검사만 하고 원문을 보정하거나 자르지 않는다.
+    private static final Pattern QUESTION_ENDING =
+            Pattern.compile("(?:요|까|십시오|바랍니다)[?？.。!！]?$");
     public static final Set<String> REPORT_TYPES =
             Set.of("ANNUAL", "HALF_YEAR", "QUARTERLY");
 
@@ -257,7 +262,7 @@ public final class InterviewGeneration {
     public static Generated validate(JsonNode value, Input input) {
         fields(value, Set.of("question", "evidence"));
 
-        String question = string(value.get("question"), 100, "QUESTION");
+        String question = string(value.get("question"), MAX_QUESTION_LENGTH, "QUESTION");
         JsonNode evidence = value.get("evidence");
 
         if (!evidence.isArray() || evidence.isEmpty() || evidence.size() > 3) {
@@ -297,6 +302,14 @@ public final class InterviewGeneration {
         }
 
         return new Generated(question, List.copyOf(checked));
+    }
+
+    // 새 AI 응답에서만 호출한다. 기존 저장 질문의 조회나 종결형을 소급 변경하지 않는다.
+    public static Generated validateComplete(Generated generated) {
+        if (!QUESTION_ENDING.matcher(generated.question().stripTrailing()).find()) {
+            throw invalidOutput("QUESTION_INCOMPLETE");
+        }
+        return generated;
     }
 
     public static String fingerprint(String question) {

@@ -65,7 +65,7 @@ class InterviewGenerationLengthRetryTest {
     void distinguishesQuestionLengthFromEvidenceFailures() {
         assertEquals(
                 "QUESTION_TOO_LONG",
-                problem("가".repeat(101), 2, 1, "해외 판매").reason()
+                problem("가".repeat(61), 2, 1, "해외 판매").reason()
         );
         assertEquals(
                 "QUESTION_EMPTY",
@@ -112,7 +112,7 @@ class InterviewGenerationLengthRetryTest {
             int attempt
     ) {
         Failure rejected = problem(
-                "가".repeat(101), 2, 1, "해외 판매"
+                "가".repeat(61), 2, 1, "해외 판매"
         );
 
         Failure recorded = runFailure(attempt, rejected);
@@ -236,7 +236,7 @@ class InterviewGenerationLengthRetryTest {
                                                         "type", "output_text",
                                                         "text",
                                                         json(
-                                                                "가".repeat(101),
+                                                                "가".repeat(61),
                                                                 2,
                                                                 1,
                                                                 "해외 판매"
@@ -322,8 +322,19 @@ class InterviewGenerationLengthRetryTest {
         ).path("instructions").asText();
 
         assertTrue(instructions.contains("재시도 지침:"));
-        assertTrue(instructions.contains("50~80자"));
+        assertTrue(instructions.contains("20~40자"));
         assertFalse(instructions.contains("마지막 문장은"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 3})
+    void unfinishedQuestionsRetryWithinTheSameExistingAttemptLimit(int attempt) {
+        var metadata = new Metadata("unfinished-request", "gpt-6-luna", 30, 20);
+        var failure = new Failure("QUESTION_GENERATION_FAILED", false, 0, metadata, "QUESTION_INCOMPLETE");
+        Failure recorded = runFailure(attempt, failure);
+        assertEquals("QUESTION_INCOMPLETE", recorded.reason());
+        assertEquals(attempt < 3, recorded.retryable());
+        assertEquals(metadata, recorded.metadata());
     }
 
     private Failure problem(

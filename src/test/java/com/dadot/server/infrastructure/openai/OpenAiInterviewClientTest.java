@@ -179,15 +179,10 @@ class OpenAiInterviewClientTest {
                 .path("instructions")
                 .asText();
 
-        assertTrue(instructions.contains("50~80자"));
-        assertTrue(instructions.contains("최대 100자"));
+        assertTrue(instructions.contains("20~40자"));
+        assertTrue(instructions.contains("최대 60자"));
         assertTrue(
                 instructions.contains("문장 끝을 자르지 않는다")
-        );
-        assertTrue(
-                instructions.contains(
-                        "특정 어미나 표현으로 제한하지 않는다"
-                )
         );
         assertFalse(instructions.contains("마지막 문장은"));
         assertFalse(instructions.contains("재생성 규칙:"));
@@ -195,8 +190,8 @@ class OpenAiInterviewClientTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {101, 160, 500})
-    void providerOutputOver100CharactersFailsValidation(int length) {
+    @ValueSource(ints = {61, 80, 100, 160, 500})
+    void providerOutputOver60CharactersFailsValidation(int length) {
         body = response(
                 "completed",
                 Map.of(
@@ -234,7 +229,7 @@ class OpenAiInterviewClientTest {
             "비용과 품질 중 무엇을 우선할 것인가요?",
             "품질과 납기를 함께 개선할 방안을 설명해 보세요.",
             "인재 확보 방안을 제안해 보십시오.",
-            "어떤 점을 우선하겠"
+            "어떤 점을 먼저 배우고 싶나요?"
     })
     void acceptsDifferentEndingsWithoutRegeneration(String question) {
         body = questionResponse(question);
@@ -383,11 +378,12 @@ class OpenAiInterviewClientTest {
         );
     }
 
-    @Test
-    void completeQuestionAt100CodePointsIsNotTruncated() {
+    @ParameterizedTest
+    @ValueSource(strings = {"가", "🙂"})
+    void completeQuestionAt60CodePointsIsNotTruncated(String character) {
         String ending = "어떻게 대응하나요?";
-        String question = "가".repeat(
-                100 - ending.codePointCount(0, ending.length())
+        String question = character.repeat(
+                60 - ending.codePointCount(0, ending.length())
         ) + ending;
 
         body = questionResponse(question);
@@ -400,10 +396,10 @@ class OpenAiInterviewClientTest {
     }
 
     @Test
-    void serverRejectsOver100RatherThanTruncatingToFitSchema() {
+    void serverRejectsOver60RatherThanTruncatingToFitSchema() {
         String ending = "어떻게 대응하나요?";
         String question = "가".repeat(
-                101 - ending.codePointCount(0, ending.length())
+                61 - ending.codePointCount(0, ending.length())
         ) + ending;
 
         body = questionResponse(question);
@@ -449,11 +445,56 @@ class OpenAiInterviewClientTest {
         );
         assertTrue(
                 instructions.contains(
-                        "100자까지 채울 필요가 없다"
+                        "60자까지 채울 필요가 없다"
                 )
         );
         assertFalse(instructions.contains("마지막 문장은"));
         assertEquals(1, requestCount.get());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"무엇", "이 회사의 주요 제품은 무엇", "어떤 점을 우선하겠", "설명해 보세", "무엇?"})
+    void unfinishedProviderQuestionIsRejectedWithMetadata(String question) {
+        body = questionResponse(question);
+        Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
+        assertEquals("QUESTION_GENERATION_FAILED", failure.code());
+        assertEquals("QUESTION_INCOMPLETE", failure.reason());
+        assertEquals("test-request", failure.metadata().requestId());
+        assertEquals(30, failure.metadata().inputTokens());
+        assertEquals(20, failure.metadata().outputTokens());
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void evidenceErrorsTakePrecedenceOverTheNewEndingCheck() {
+        body = questionResponse("어떤 점을 우선하겠").replace("해외 판매", "없는 근거");
+        Failure failure = assertThrows(Failure.class, () -> client.generate(lease()));
+        assertEquals("EVIDENCE_QUOTE_MISMATCH", failure.reason());
+        assertFalse(failure.retryable());
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void preservesJobExperienceAndQuestionHistoryInTheGenerationInput() {
+        var previous = List.of("지원 계기는 무엇인가요?", "협업에서 무엇이 중요할까요?");
+        var input = new Input("예시 회사", new Job(null, "생산기술", true), List.of(),
+                lease().input().sections(),
+                List.of(new Material(3, 4, 1, "팀 과제", "팀 과제에서 역할을 나눴습니다.")), previous);
+        var encoded = mapper.readTree(client.encode("gpt-6-luna", "관리자 지침", input));
+        var actual = mapper.readTree(encoded.path("input").asText());
+        assertEquals("생산기술", actual.path("job").path("jobName").asText());
+        assertEquals("팀 과제에서 역할을 나눴습니다.", actual.path("experiences").get(0).path("content").asText());
+        assertEquals(mapper.valueToTree(previous), actual.path("previousQuestions"));
+        assertEquals(mapper.readTree(mapper.writeValueAsString(input.sections())), actual.path("sections"));
+    }
+
+    @Test
+    void changedPolicyStopsBeforeCallingTheProvider() {
+        var old = lease();
+        var stale = new Lease(old.taskId(), old.userId(), old.companyId(), old.contextId(), old.policyVersionId(),
+                old.owner(), old.fence(), old.runId(), old.attempt(), old.model(), "old-policy", old.rules(), old.input());
+        assertEquals("AI_POLICY_CHANGED", assertThrows(Failure.class, () -> client.generate(stale)).code());
+        assertEquals(0, requestCount.get());
     }
 
     private Lease lease() {

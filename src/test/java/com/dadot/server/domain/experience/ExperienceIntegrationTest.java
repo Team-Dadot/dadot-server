@@ -176,11 +176,131 @@ class ExperienceIntegrationTest {
         assertEquals(3, personalization());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"TITLE", "CONTENT", "BOTH"})
+    void noOpSameValuePatchPreservesVersionsAndTimestamps(String fields) throws Exception {
+        JsonNode original = data(create(key(), body("제목", "본문")).andExpect(status().isCreated()));
+        long id = original.get("experienceId").longValue();
+        LocalDateTime userUpdated = jdbc.queryForObject("select updated_at from users where id = ?", LocalDateTime.class, user);
+        now = now.plusSeconds(60);
+        doReturn(now).when(clock).instant();
+        var request = new LinkedHashMap<String, Object>();
+        request.put("version", 1);
+        if (!fields.equals("CONTENT")) request.put("title", "제목");
+        if (!fields.equals("TITLE")) request.put("content", "본문");
+
+        assertEquals(original, data(update(id, mapper.writeValueAsString(request)).andExpect(status().isOk())));
+        assertEquals(1, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals(1, personalization());
+        assertEquals(userUpdated, jdbc.queryForObject("select updated_at from users where id = ?", LocalDateTime.class, user));
+    }
+
     @Test
-    void sameValuePatchStillAdvancesBothVersionsExactlyOnce() throws Exception {
+    void noOpOneHundredIdenticalSavesKeepOneFullBody() throws Exception {
+        long id = seed(user, "EXPERIENCE", "제목", "가".repeat(5000));
+        JsonNode original = data(detail(id).andExpect(status().isOk()));
+        for (int i = 0; i < 100; i++) {
+            assertEquals(original, data(update(id, "{\"version\":1,\"title\":\"제목\"}").andExpect(status().isOk())));
+        }
+        assertEquals(1, repository.count(user));
+        assertEquals(1, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals(5000, scalar("select sum(char_length(content_text)) from material_versions where material_id = ?", id));
+        assertEquals(0, personalization());
+    }
+
+    @Test
+    void noOpStaleVersionStillConflictsEvenWhenTheRequestedContentMatches() throws Exception {
         long id = seed(user, "EXPERIENCE", "제목", "본문");
-        update(id, "{\"version\":1,\"title\":\"제목\"}").andExpect(status().isOk())
+        update(id, "{\"version\":1,\"title\":\"변경\"}").andExpect(status().isOk());
+        update(id, "{\"version\":1,\"title\":\"변경\"}").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("VERSION_CONFLICT"));
+        assertEquals(2, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals(1, personalization());
+    }
+
+    @Test
+    void noOpConcurrentIdenticalSavesDoNotCreateNewVersions() throws Exception {
+        long id = seed(user, "EXPERIENCE", "제목", "본문");
+        assertEquals(List.of(200, 200), concurrent(
+                () -> code(update(id, "{\"version\":1,\"title\":\"제목\"}")),
+                () -> code(update(id, "{\"version\":1,\"content\":\"본문\"}"))));
+        assertEquals(1, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals(0, personalization());
+    }
+
+    @Test
+    void noOpConcurrentSaveDoesNotBlockOrOverwriteARealChange() throws Exception {
+        long id = seed(user, "EXPERIENCE", "제목", "본문");
+        var codes = concurrent(
+                () -> code(update(id, "{\"version\":1,\"title\":\"제목\"}")),
+                () -> code(update(id, "{\"version\":1,\"title\":\"변경\"}")));
+        assertTrue(codes.get(0) == 200 || codes.get(0) == 409);
+        assertEquals(200, codes.get(1));
+        detail(id).andExpect(status().isOk()).andExpect(jsonPath("$.data.title").value("변경"))
                 .andExpect(jsonPath("$.data.version").value(2));
+        assertEquals(2, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals(1, personalization());
+    }
+
+    @Test
+    void noOpStillRechecksAuthenticationBeforeReturning() throws Exception {
+        long id = seed(user, "EXPERIENCE", "제목", "본문");
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            doReturn(now.plusSeconds(3600)).when(clock).instant();
+            return result;
+        }).when(repository).current(eq(user), eq(id), eq(true));
+        update(id, "{\"version\":1,\"title\":\"제목\"}").andExpect(status().isUnauthorized());
+        assertEquals(1, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals(0, personalization());
+    }
+
+    @Test
+    void noOpAtCounterLimitsSucceedsWithoutAttemptingAnIncrement() throws Exception {
+        long id = seed(user, "EXPERIENCE", "제목", "본문");
+        jdbc.update("update personal_materials set current_version_no = null where id = ?", id);
+        jdbc.update("update material_versions set version_no = ? where material_id = ?", Integer.MAX_VALUE, id);
+        jdbc.update("update personal_materials set current_version_no = ? where id = ?", Integer.MAX_VALUE, id);
+        jdbc.update("update users set personalization_version = ? where id = ?", Long.MAX_VALUE, user);
+        update(id, mapper.writeValueAsString(Map.of("version", Integer.MAX_VALUE, "title", "제목")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.version").value(Integer.MAX_VALUE));
+        assertEquals(1, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals(Long.MAX_VALUE, personalization());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"본문 ", " 본문", "본문\n", "본문\r\n", "본문😀"})
+    void noOpComparisonTreatsEveryTextDifferenceAsAChange(String content) throws Exception {
+        long id = seed(user, "EXPERIENCE", "제목", "본문");
+        update(id, mapper.writeValueAsString(Map.of("version", 1, "content", content)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.version").value(2))
+                .andExpect(jsonPath("$.data.content").value(content));
+        assertEquals(2, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals("본문", jdbc.queryForObject("select content_text from material_versions where material_id = ? and version_no = 1", String.class, id));
+        assertEquals(1, personalization());
+    }
+
+    @Test
+    void noOpComparisonDoesNotNormalizeDifferentUnicodeSequences() throws Exception {
+        long id = seed(user, "EXPERIENCE", "제목", "가");
+        String decomposed = "\u1100\u1161";
+        update(id, mapper.writeValueAsString(Map.of("version", 1, "content", decomposed)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.version").value(2))
+                .andExpect(jsonPath("$.data.content").value(decomposed));
+        assertEquals(2, scalar("select count(*) from material_versions where material_id = ?", id));
+        assertEquals(1, personalization());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"TITLE", "CONTENT"})
+    void noOpComparisonRequiresBothFieldsToMatch(String changedField) throws Exception {
+        long id = seed(user, "EXPERIENCE", "제목", "본문");
+        String title = changedField.equals("TITLE") ? "변경" : "제목";
+        String content = changedField.equals("CONTENT") ? "변경" : "본문";
+        update(id, mapper.writeValueAsString(Map.of("version", 1, "title", title, "content", content)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.version").value(2))
+                .andExpect(jsonPath("$.data.title").value(title)).andExpect(jsonPath("$.data.content").value(content));
+        assertEquals(2, scalar("select count(*) from material_versions where material_id = ?", id));
         assertEquals(1, personalization());
     }
 

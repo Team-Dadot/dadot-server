@@ -100,6 +100,11 @@ public class ExperienceService {
             if (previous.version() != request.version()) {
                 throw new BusinessException(ErrorCode.VERSION_CONFLICT);
             }
+            if ((request.title() == null || previous.title().equals(request.title()))
+                    && (request.content() == null || previous.content().equals(request.content()))) {
+                access.require(actor, true);
+                return previous;
+            }
             Instant now = now();
             repository.update(user, previous, request, now);
             repository.advancePersonalization(user, now);

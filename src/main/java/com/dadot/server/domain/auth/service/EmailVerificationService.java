@@ -5,8 +5,8 @@ import com.dadot.server.domain.auth.dto.response.IssueEmailVerificationResponse;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.dao.TransientDataAccessException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -32,8 +32,8 @@ public class EmailVerificationService {
             );
 
         } catch (
-                TransientDataAccessException
-                | DataAccessResourceFailureException ex
+                DataAccessException
+                | TransactionException ex
         ) {
             throw new BusinessException(
                     ErrorCode.SERVICE_UNAVAILABLE

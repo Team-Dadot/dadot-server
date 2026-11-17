@@ -32,6 +32,12 @@ public class VerificationMaintenance {
                 ZoneOffset.UTC
         );
 
+        // 발송 미확정 코드의 암호문은 짧은 유효기간 뒤 정리한다. 활성 lease는 건드리지 않는다.
+        jdbc.update("""
+                delete from email_verification_deliveries
+                where expires_at <= ? and lease_until <= ? limit 1000
+                """, now, now);
+
         int deleted;
         int rounds = 0;
 

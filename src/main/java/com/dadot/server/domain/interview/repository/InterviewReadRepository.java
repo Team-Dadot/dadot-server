@@ -24,6 +24,11 @@ public class InterviewReadRepository {
     private final CompanyLogoUrlResolver logos;
 
     public Preparation preparation(long user, long company, boolean lock) {
+        if (lock) {
+            // 사용자별 변경은 기존처럼 직렬화하고, 공통 기업·직무는 함께 읽는다.
+            lockPreparation(user, company);
+        }
+
         return jdbc.query("""
                 select c.name, uc.job_id, coalesce(j.name, uc.custom_job_name),
                        (uc.active_slot is not null and c.is_service_company = true),
@@ -33,7 +38,7 @@ public class InterviewReadRepository {
                 join companies c on c.id = uc.company_id
                 left join jobs j on j.id = uc.job_id
                 where uc.user_id = ? and uc.company_id = ?
-                """ + (lock ? " for update" : ""),
+                """ + (lock ? " lock in share mode" : ""),
                 (rs, n) -> new Preparation(
                         user, company, rs.getString(1),
                         rs.getObject(2, Long.class), rs.getString(3),
@@ -41,6 +46,22 @@ public class InterviewReadRepository {
                 ),
                 user, company
         ).stream().findFirst().orElseThrow(InterviewPolicy::missing);
+    }
+
+    private void lockPreparation(long user, long company) {
+        // users → user_companies → 공통 조회 순서를 고정한다.
+        if (jdbc.query("""
+                select id from users where id = ? for update
+                """, (rs, n) -> rs.getLong(1), user).isEmpty()) {
+            throw InterviewPolicy.missing();
+        }
+
+        if (jdbc.query("""
+                select version from user_companies
+                where user_id = ? and company_id = ? for update
+                """, (rs, n) -> rs.getLong(1), user, company).isEmpty()) {
+            throw InterviewPolicy.missing();
+        }
     }
 
     public Daily daily(long user, long company, Instant now) {

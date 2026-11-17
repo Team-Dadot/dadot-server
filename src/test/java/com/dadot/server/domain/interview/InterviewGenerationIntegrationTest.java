@@ -3,6 +3,7 @@ package com.dadot.server.domain.interview;
 import com.dadot.server.domain.interview.model.InterviewGeneration;
 import com.dadot.server.domain.interview.model.InterviewGeneration.*;
 import com.dadot.server.domain.interview.repository.InterviewGenerationRepository;
+import com.dadot.server.domain.interview.repository.InterviewReadRepository;
 import com.dadot.server.domain.interview.service.InterviewGenerationWorker;
 import com.dadot.server.global.security.AccessTokenIssuer;
 import com.dadot.server.infrastructure.openai.OpenAiInterviewClient;
@@ -64,6 +65,7 @@ class InterviewGenerationIntegrationTest {
     @Autowired Clock clock;
     @Autowired AccessTokenIssuer tokens;
     @Autowired InterviewGenerationWorker worker;
+    @Autowired InterviewReadRepository reads;
     @MockitoSpyBean InterviewGenerationRepository repository;
     @Autowired PlatformTransactionManager manager;
     @MockitoSpyBean OpenAiInterviewClient client;
@@ -882,6 +884,57 @@ class InterviewGenerationIntegrationTest {
                         company
                 )
         );
+    }
+
+    @Test
+    void sharedCompanyReadersDoNotBlockWorkerLoadOrSave() throws Exception {
+        String task = accepted();
+        var tx = new TransactionTemplate(manager);
+        tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        tx.setTimeout(10);
+        var claim = tx.execute(status -> repository.claim(clock.instant()));
+        assertNotNull(claim);
+
+        long other = account();
+        jdbc.update("""
+                insert into user_companies(user_id, company_id, active_slot, custom_job_name)
+                values (?, ?, 1, '다른 사용자 직무')
+                """, other, company);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var reader = executor.submit(() -> tx.executeWithoutResult(status -> {
+                reads.preparation(other, company, true);
+                entered.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS)) throw new AssertionError("reader timed out");
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(ex);
+                }
+            }));
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS));
+                tx.executeWithoutResult(status -> {
+                    int previous = Objects.requireNonNull(jdbc.queryForObject(
+                            "select @@session.innodb_lock_wait_timeout", Integer.class));
+                    jdbc.execute("set session innodb_lock_wait_timeout = 1");
+                    try {
+                        Lease lease = repository.load(claim, clock.instant());
+                        assertNotNull(lease);
+                        repository.save(claim, output(lease), clock.instant());
+                    } finally {
+                        jdbc.execute("set session innodb_lock_wait_timeout = " + previous);
+                    }
+                });
+                assertEquals("SUCCEEDED", state(task));
+                assertTrue(question(task) > 0);
+            } finally {
+                release.countDown();
+                reader.get(5, TimeUnit.SECONDS);
+            }
+        }
     }
 
     @Test

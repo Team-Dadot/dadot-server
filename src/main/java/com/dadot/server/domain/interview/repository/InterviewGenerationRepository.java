@@ -423,10 +423,8 @@ public class InterviewGenerationRepository {
             throw new Failure("CONTEXT_UNAVAILABLE", false);
         }
 
-        jdbc.queryForObject("""
-                select id from companies where id = ? for update
-                """, Long.class, claim.companyId());
-
+        // preparation()의 기업 공유 잠금으로 공시 변경과의 경합을 막는다.
+        // 독점 잠금으로 승격하면 다른 사용자의 공유 잠금과 교착될 수 있다.
         sources.validate(claim.companyId(), lease.input().sources());
 
         if (!owned(claim, now, true)) return null;

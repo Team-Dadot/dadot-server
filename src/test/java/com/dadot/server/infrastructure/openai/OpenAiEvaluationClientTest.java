@@ -1,10 +1,11 @@
 package com.dadot.server.infrastructure.openai;
 
+import com.dadot.server.domain.interview.model.InterviewEvaluation;
 import com.dadot.server.domain.interview.model.InterviewEvaluation.*;
+import com.dadot.server.domain.interview.model.InterviewPolicy;
 import com.dadot.server.domain.interview.model.InterviewGeneration.Failure;
 import com.dadot.server.domain.interview.support.InterviewEvaluationProperties;
 import com.dadot.server.domain.interview.EvaluationFixtures;
-import com.dadot.server.domain.interview.support.InterviewGenerationProperties;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -202,9 +203,63 @@ class OpenAiEvaluationClientTest {
         assertEquals(client.inputHash("gpt-6-luna", "지침", source), client.inputHash("gpt-6-luna", "지침", source));
     }
 
+    @Test
+    void motivationWithoutRegisteredExperienceKeepsFeedbackAndScoresInExistingResponse() {
+        Input source = EvaluationFixtures.input();
+        Input input = new Input(source.companyName(), source.job(), "우리 회사에 지원한 이유는 무엇인가요?",
+                "여러 고객이 사용하는 서비스를 운영한다는 점에 관심이 생겨 지원했어요.",
+                source.evidence(), List.of(), source.rubric());
+        String quote = "여러 고객이 사용하는 서비스를 운영한다는 점에 관심이 생겨 지원했어요.";
+        List<Score> criteria = InterviewPolicy.CODES.stream().map(code -> new Score(code, 22,
+                "관심을 가진 이유를 한 가지 덧붙여 주세요.", "회사에 관심을 가진 점이 드러나지만 이유는 빠져 있어요.", quote)).toList();
+        Generated generated = new Generated("관심을 가진 이유를 덧붙여 주세요.",
+                "관심 있는 회사 특징을 설명했어요. 그 점에 관심을 가진 이유를 덧붙여 주세요.",
+                criteria, List.of("관심 있는 회사 특징을 밝혔어요."),
+                List.of("관심을 가진 이유를 덧붙이면 지원동기가 드러나요. 예: 저는 [관심을 가진 이유] 때문에 지원했어요."), List.of());
+        body = response("completed", Map.of("type", "output_text", "text", mapper.writeValueAsString(generated)));
+
+        Generated actual = client.evaluate(lease(input)).generated();
+
+        assertEquals(generated, actual);
+        assertEquals(88, InterviewEvaluation.total(actual));
+        assertTrue(actual.relatedMaterials().isEmpty());
+        assertEquals(180, request.get().at("/text/format/schema/properties/improvements/items/maxLength").asInt());
+        JsonNode encodedInput = mapper.readTree(request.get().path("input").asText());
+        assertEquals(input.answer(), encodedInput.path("answer").asText());
+        assertTrue(encodedInput.path("experiences").isEmpty());
+    }
+
+    @Test
+    void changedPolicyRejectsPreviouslyPinnedTaskBeforeHttpCall() {
+        Lease original = lease();
+        Lease stale = new Lease(original.claim(), original.model(), "previous-policy-hash",
+                original.rules(), original.input());
+
+        Failure failure = assertThrows(Failure.class, () -> client.evaluate(stale));
+
+        assertEquals("AI_POLICY_CHANGED", failure.code());
+        assertNull(request.get());
+    }
+
+    @Test
+    void oversizedCorrectionExampleIsRejectedInsteadOfBeingCut() {
+        var output = mapper.valueToTree(EvaluationFixtures.output(EvaluationFixtures.input(), 20));
+        ((tools.jackson.databind.node.ObjectNode) output).putArray("improvements").add("가".repeat(181));
+        body = response("completed", Map.of("type", "output_text", "text", mapper.writeValueAsString(output)));
+
+        Failure failure = assertThrows(Failure.class, () -> client.evaluate(lease()));
+
+        assertEquals("AI_INVALID_OUTPUT", failure.code());
+        assertNotNull(failure.metadata());
+    }
+
     private Lease lease() {
+        return lease(EvaluationFixtures.input());
+    }
+
+    private Lease lease(Input input) {
         return new Lease(new Claim("task", "owner", 1, 1, 1, 1), "gpt-6-luna",
-                client.policyHash("지침"), "지침", EvaluationFixtures.input());
+                client.policyHash("지침"), "지침", input);
     }
 
     private String response(String state, Map<String, String> content) {

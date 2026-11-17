@@ -38,7 +38,10 @@ public class InterviewEvaluationWorker {
         write.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
 
-    @Scheduled(fixedDelayString = "${app.interview-evaluation.worker-delay-ms:1000}")
+    @Scheduled(
+            scheduler = "interviewEvaluationScheduler",
+            fixedDelayString = "${app.interview-evaluation.worker-delay-ms:1000}"
+    )
     public void poll() {
         if (!properties.workerEnabled() || !client.ready()) return;
         try { runOnce(); }

@@ -47,6 +47,7 @@ public class InterviewGenerationWorker {
     }
 
     @Scheduled(
+            scheduler = "interviewGenerationScheduler",
             fixedDelayString = "${app.interview-generation.worker-delay-ms:1000}"
     )
     public void poll() {

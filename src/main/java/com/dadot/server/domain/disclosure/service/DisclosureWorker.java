@@ -73,6 +73,7 @@ public class DisclosureWorker {
     }
 
     @Scheduled(
+            scheduler = "disclosureScheduler",
             fixedDelayString = "${app.dart.worker-delay-ms:1000}"
     )
     public void poll() {
@@ -93,6 +94,7 @@ public class DisclosureWorker {
     }
 
     @Scheduled(
+            scheduler = "disclosureCleanupScheduler",
             fixedDelayString = "${app.dart.cleanup-delay-ms:300000}"
     )
     public void cleanup() {

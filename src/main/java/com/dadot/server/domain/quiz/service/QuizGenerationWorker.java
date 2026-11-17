@@ -38,7 +38,10 @@ public class QuizGenerationWorker {
         write.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
 
-    @Scheduled(fixedDelayString = "${app.quiz-generation.worker-delay-ms:1000}")
+    @Scheduled(
+            scheduler = "quizGenerationScheduler",
+            fixedDelayString = "${app.quiz-generation.worker-delay-ms:1000}"
+    )
     public void poll() {
         if (!properties.workerEnabled() || !client.ready()) return;
         try { runOnce(); }
@@ -47,7 +50,10 @@ public class QuizGenerationWorker {
         }
     }
 
-    @Scheduled(fixedDelayString = "${app.quiz-generation.cleanup-delay-ms:300000}")
+    @Scheduled(
+            scheduler = "quizCleanupScheduler",
+            fixedDelayString = "${app.quiz-generation.cleanup-delay-ms:300000}"
+    )
     public void cleanup() {
         if (!properties.workerEnabled()) return;
         try { write.executeWithoutResult(tx -> repository.cleanup(clock.instant())); }

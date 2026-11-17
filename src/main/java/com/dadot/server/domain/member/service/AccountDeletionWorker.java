@@ -57,6 +57,7 @@ public class AccountDeletionWorker {
     }
 
     @Scheduled(
+            scheduler = "accountDeletionScheduler",
             initialDelayString = "${app.account-deletion.delay-ms:30000}",
             fixedDelayString = "${app.account-deletion.delay-ms:30000}"
     )

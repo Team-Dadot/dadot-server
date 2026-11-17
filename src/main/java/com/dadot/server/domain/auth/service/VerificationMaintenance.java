@@ -23,6 +23,7 @@ public class VerificationMaintenance {
     private final Clock clock;
 
     @Scheduled(
+            scheduler = "verificationMaintenanceScheduler",
             fixedDelayString =
                     "${app.email-verification.maintenance-delay-ms:300000}"
     )

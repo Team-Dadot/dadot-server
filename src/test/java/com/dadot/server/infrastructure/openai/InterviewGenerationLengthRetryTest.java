@@ -354,7 +354,8 @@ class InterviewGenerationLengthRetryTest {
     @ValueSource(ints = {1, 2, 3})
     void unsuitableCoreQuestionsUseTheExistingAttemptLimit(int attempt) {
         for (String reason : List.of("QUESTION_POLICY_CORE_MISMATCH", "QUESTION_POLICY_JOB_NAME",
-                "QUESTION_POLICY_FORCED_BRIDGE", "QUESTION_POLICY_UNSUPPORTED_CONTEXT")) {
+                "QUESTION_POLICY_FORCED_BRIDGE", "QUESTION_POLICY_UNSUPPORTED_CONTEXT",
+                "QUESTION_POLICY_RECENT_DUPLICATE")) {
             var metadata = new Metadata("core-request", "gpt-6-luna", 30, 20);
             var recorded = runFailure(attempt, new Failure("QUESTION_GENERATION_FAILED", false, 0, metadata, reason));
             assertEquals(reason, recorded.reason());

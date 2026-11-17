@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 
 /** 공시 적격성·핵심 질문·새 AI 질문의 허용 범위를 같은 정책으로 관리한다. */
 public final class InterviewQuestionPolicy {
-    private static final String VERSION = "business-core-questions-v1";
+    private static final String VERSION = "business-core-questions-v2-recency";
     private static final List<String> EXCLUDED_HEADINGS = List.of(
             "재무제표", "회계정책", "회계추정", "작성기준", "작성의기준", "주석", "감사보고서",
             "법적고지", "위험고지", "투자위험", "우발채무", "재무위험", "금융상품",
@@ -95,10 +95,10 @@ public final class InterviewQuestionPolicy {
 
     public static Core core(Input input) {
         List<String> history = input.previousQuestions() == null ? List.of() : input.previousQuestions();
-        String latestType = history.isEmpty() ? "" : typeOf(history.getFirst());
         return CORES.stream().filter(c -> input.sections().stream().anyMatch(s -> eligible(s) && matches(c, s)))
-                .min(Comparator.comparingLong((Core c) -> history.stream().filter(q -> typeOf(q).equals(c.type())).count())
-                        .thenComparing(c -> c.type().equals(latestType))
+                // 횟수보다 최근 출제 순서를 우선한다. 표현이 달라도 같은 의도는 같은 유형으로 본다.
+                .min(Comparator.comparingInt((Core c) -> mostRecentPosition(history, c.type())).reversed()
+                        .thenComparingLong(c -> history.stream().filter(q -> typeOf(q).equals(c.type())).count())
                         .thenComparing(c -> history.stream().anyMatch(q -> normalize(q).equals(normalize(c.question())))))
                 .orElseThrow(() -> new Failure("CONTENT_UNAVAILABLE", false));
     }
@@ -110,10 +110,18 @@ public final class InterviewQuestionPolicy {
         if (UNSUPPORTED_QUESTION_WORDS.stream().anyMatch(text::contains)) {
             throw unsuitable("QUESTION_POLICY_UNSUPPORTED_CONTEXT");
         }
+        List<String> history = input.previousQuestions() == null ? List.of() : input.previousQuestions();
+        String type = typeOf(generated.question());
+        if (history.stream().anyMatch(q -> questionKey(q).equals(questionKey(generated.question())))
+                || (!history.isEmpty() && !type.isEmpty() && type.equals(typeOf(history.getFirst())))) {
+            throw unsuitable("QUESTION_POLICY_RECENT_DUPLICATE");
+        }
         Core core = core(input);
         if ((core.type().equals("회사 지원동기") || core.type().equals("직무 이해"))
                 && BRIDGES.stream().anyMatch(text::contains)) throw unsuitable("QUESTION_POLICY_FORCED_BRIDGE");
-        if (!core.intent().matcher(text).find()) throw unsuitable("QUESTION_POLICY_CORE_MISMATCH");
+        if (!core.intent().matcher(text).find() || !core.type().equals(type)) {
+            throw unsuitable("QUESTION_POLICY_CORE_MISMATCH");
+        }
         return generated;
     }
 
@@ -159,6 +167,17 @@ public final class InterviewQuestionPolicy {
         if (STRENGTH.matcher(text).find()) return "강점 인식";
         if (INTEREST.matcher(text).find()) return "사업 관심";
         return "";
+    }
+
+    private static int mostRecentPosition(List<String> history, String type) {
+        for (int i = 0; i < history.size(); i++) {
+            if (type.equals(typeOf(history.get(i)))) return i;
+        }
+        return history.size();
+    }
+
+    private static String questionKey(String question) {
+        return normalize(question).replaceAll("[\\p{P}\\p{S}]", "");
     }
 
     private static String normalize(String text) {

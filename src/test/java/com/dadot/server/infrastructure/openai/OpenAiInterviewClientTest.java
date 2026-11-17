@@ -579,6 +579,43 @@ class OpenAiInterviewClientTest {
         return lease(1);
     }
 
+    private Lease withPreviousQuestions(List<String> previous) {
+        var base = lease();
+        var old = base.input();
+        var input = new Input("SK하이닉스", old.job(), old.sources(), old.sections(), old.experiences(), previous);
+        return new Lease(base.taskId(), base.userId(), base.companyId(), base.contextId(), base.policyVersionId(),
+                base.owner(), base.fence(), base.runId(), base.attempt(), base.model(), base.promptHash(), base.rules(), input);
+    }
+
+    @Test
+    void rejectsTheScreenshotParaphraseReturnedByTheProviderWithUsageMetadata() {
+        body = questionResponse("SK하이닉스에 지원한 이유는 무엇인가요?");
+        var failure = assertThrows(Failure.class, () -> client.generate(withPreviousQuestions(
+                List.of("SK하이닉스에 지원한 이유를 말씀해 주세요.",
+                        "어떤 제품이 궁금한가요?", "우리 회사 제품의 강점은 무엇인가요?",
+                        "입사 후 어떤 일을 해보고 싶나요?", "본인의 경험을 어떻게 활용하고 싶나요?",
+                        "어떤 사업이 인상 깊었나요?", "우리 회사 사업의 매력은 무엇인가요?",
+                        "입사 후 어떤 업무를 배우고 싶나요?", "본인의 강점을 어떻게 활용하고 싶나요?"))));
+        assertEquals("QUESTION_POLICY_RECENT_DUPLICATE", failure.reason());
+        assertEquals("test-request", failure.metadata().requestId());
+        assertEquals(30, failure.metadata().inputTokens());
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void requestsAndAcceptsAnotherTypeInsteadOfParaphrasingThePreviousQuestion() {
+        body = questionResponse("어떤 제품이 궁금한가요?");
+        var output = client.generate(withPreviousQuestions(
+                List.of("SK하이닉스에 지원한 이유를 말씀해 주세요.")));
+        assertEquals("어떤 제품이 궁금한가요?", output.generated().question());
+        var actual = mapper.readTree(request.get().path("input").asText());
+        assertEquals("사업 관심", actual.path("coreQuestion").path("type").asText());
+        assertEquals("SK하이닉스에 지원한 이유를 말씀해 주세요.",
+                actual.path("previousQuestions").get(0).asText());
+        assertFalse(request.get().path("instructions").asText().contains("표현만 바꾼다"));
+        assertEquals(1, requestCount.get());
+    }
+
     private Lease lease(int attempt) {
         var input = new Input(
                 "회사",

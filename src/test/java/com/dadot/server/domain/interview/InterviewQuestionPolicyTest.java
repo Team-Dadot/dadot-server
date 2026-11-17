@@ -126,6 +126,90 @@ class InterviewQuestionPolicyTest {
                 List.of(new Material(1, 1, 1, "팀 활동", "학교 팀 활동에서 역할을 나눴습니다.")), List.copyOf(history));
     }
 
+    @Test
+    void doesNotAcceptAMotivationQuestionDisguisedAsBusinessInterest() {
+        var prepared = InterviewQuestionPolicy.prepare(input("인사", List.of(AUTOMATION),
+                List.of("우리 회사에 지원한 이유는 무엇인가요?")));
+        assertEquals("사업 관심", InterviewQuestionPolicy.core(prepared).type());
+        assertEquals("QUESTION_POLICY_RECENT_DUPLICATE", assertThrows(Failure.class,
+                () -> InterviewQuestionPolicy.validateQuestion(
+                        generated("우리 회사 사업에 관심을 갖게 된 이유는 무엇인가요?"), prepared)).reason());
+    }
+
+    private Section allTopics() {
+        return new Section(3, 1, "사업의 개요",
+                "회사는 제품을 판매하고 신규 사업에 투자하며 직원 교육을 운영합니다.");
+    }
+
+    @Test
+    void avoidsTheScreenshotMotivationParaphraseEvenWhenOtherTypesWereUsedMoreOften() {
+        var history = List.of("SK하이닉스에 지원한 이유를 말씀해 주세요.",
+                "입사 후 어떤 일을 해보고 싶나요?", "본인의 경험을 어떻게 활용하고 싶나요?",
+                "우리 회사 제품의 강점은 무엇인가요?", "어떤 사업이 인상 깊었나요?",
+                "입사 후 어떤 업무를 배우고 싶나요?", "본인의 강점을 어떻게 활용하고 싶나요?",
+                "우리 회사 사업의 매력은 무엇인가요?", "어떤 제품이 궁금한가요?");
+        var prepared = InterviewQuestionPolicy.prepare(input("인사", List.of(allTopics()), history));
+        assertEquals("사업 관심", InterviewQuestionPolicy.core(prepared).type());
+        var failure = assertThrows(Failure.class, () -> InterviewQuestionPolicy.validateQuestion(
+                generated("SK하이닉스에 지원한 이유는 무엇인가요?"), prepared));
+        assertEquals("QUESTION_POLICY_RECENT_DUPLICATE", failure.reason());
+    }
+
+    @Test
+    void choosesTheOldestTypeWhenEveryTypeOccursTwiceInTheTenQuestionWindow() {
+        var history = List.of("우리 회사에 지원한 이유는 무엇인가요?",
+                "우리 회사 사업에서 인상 깊은 점은 무엇인가요?", "우리 회사 제품의 강점은 무엇인가요?",
+                "입사 후 어떤 일을 해보고 싶나요?", "본인의 경험을 어떻게 활용하고 싶나요?",
+                "우리 회사에 관심을 갖게 된 계기는 무엇인가요?", "어떤 제품이 궁금한가요?",
+                "우리 회사 사업의 매력은 무엇인가요?", "입사 후 어떤 업무를 배우고 싶나요?",
+                "본인의 강점을 어떻게 활용하고 싶나요?");
+        var prepared = InterviewQuestionPolicy.prepare(input("인사", List.of(allTopics()), history));
+        assertEquals("기여", InterviewQuestionPolicy.core(prepared).type());
+    }
+
+    @Test
+    void cyclesAllFiveExistingTypesForNinetyGenerationsWithTheRealHistoryWindow() {
+        var history = new ArrayList<String>();
+        var cycle = new HashSet<String>();
+        String previousType = "";
+        for (int i = 0; i < 90; i++) {
+            var prepared = InterviewQuestionPolicy.prepare(input("인사", List.of(allTopics()),
+                    history.stream().limit(10).toList()));
+            var core = InterviewQuestionPolicy.core(prepared);
+            assertNotEquals(previousType, core.type());
+            assertTrue(cycle.add(core.type()), "유형이 한 순환 안에서 반복됨: " + i);
+            if (cycle.size() == 5) cycle.clear();
+            // 문장 표면이 달라도 유형별 이력이 유지되는지 확인한다.
+            history.add(0, core.question().replace("우리 회사", "SK하이닉스"));
+            previousType = core.type();
+        }
+    }
+
+    @Test
+    void alternatesAvailableTypesWhenOnlyPeopleRelatedEvidenceExists() {
+        var people = new Section(4, 1, "직원 교육", "직원 교육을 운영하고 인력 채용을 진행합니다.");
+        var history = new ArrayList<String>();
+        String previousType = "";
+        for (int i = 0; i < 12; i++) {
+            var prepared = InterviewQuestionPolicy.prepare(input("인사", List.of(people),
+                    history.stream().limit(10).toList()));
+            var core = InterviewQuestionPolicy.core(prepared);
+            assertTrue(List.of("직무 이해", "기여").contains(core.type()));
+            assertNotEquals(previousType, core.type());
+            history.add(0, core.question());
+            previousType = core.type();
+        }
+    }
+
+    @Test
+    void rejectsAnOlderExactQuestionDespitePunctuationChanges() {
+        var history = List.of("어떤 제품이 궁금한가요?", "SK하이닉스에 지원한 이유는 무엇인가요?");
+        var prepared = InterviewQuestionPolicy.prepare(input("인사", List.of(AUTOMATION), history));
+        assertEquals("QUESTION_POLICY_RECENT_DUPLICATE", assertThrows(Failure.class,
+                () -> InterviewQuestionPolicy.validateQuestion(
+                        generated("SK하이닉스에 지원한 이유는 무엇인가요？"), prepared)).reason());
+    }
+
     private Generated generated(String question) {
         return new Generated(question, List.of(new Quote(1, 1, AUTOMATION.content(),
                 "이 회사는 물류센터에 AI와 로봇을 적용하고 있어요.")));

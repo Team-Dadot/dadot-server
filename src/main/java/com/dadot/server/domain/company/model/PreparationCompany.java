@@ -21,6 +21,8 @@ public final class PreparationCompany {
 
     public enum JobScope { THIS_COMPANY, ALL_ACTIVE }
 
+    public enum CompanyStatus { ACTIVE, EXCLUDED }
+
     public record JobInput(Long jobId, String customName) {
         public JobInput {
             if (jobId != null) id(jobId);

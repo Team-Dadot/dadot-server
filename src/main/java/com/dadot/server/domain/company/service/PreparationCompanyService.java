@@ -72,20 +72,39 @@ public class PreparationCompanyService {
     }
 
     public Page list(SessionAuthenticationToken actor, Paging paging) {
-        if (paging == null) throw PreparationCompany.invalid();
+        return list(actor, paging, CompanyStatus.ACTIVE);
+    }
+
+    public Page list(
+            SessionAuthenticationToken actor,
+            Paging paging,
+            CompanyStatus status
+    ) {
+        if (paging == null || status == null) {
+            throw PreparationCompany.invalid();
+        }
 
         return storage("list", () ->
                 Objects.requireNonNull(read.execute(tx -> {
                     long user = access.require(actor, false);
-                    var rows = repository.rows(user);
-                    long total = rows.size();
+                    long total;
+                    List<Row> page;
 
-                    List<Row> page = paging.offset() >= total
-                            ? List.of()
-                            : rows.subList(
-                            (int) paging.offset(),
-                            (int) Math.min(
-                                    total, paging.offset() + paging.size()));
+                    if (status == CompanyStatus.EXCLUDED) {
+                        total = repository.excludedCount(user);
+                        page = paging.offset() >= total
+                                ? List.of()
+                                : repository.excludedRows(user, paging);
+                    } else {
+                        var rows = repository.rows(user);
+                        total = rows.size();
+                        page = paging.offset() >= total
+                                ? List.of()
+                                : rows.subList(
+                                (int) paging.offset(),
+                                (int) Math.min(
+                                        total, paging.offset() + paging.size()));
+                    }
 
                     return new Page(
                             items(user, page, clock.instant()),

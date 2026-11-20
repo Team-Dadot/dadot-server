@@ -31,7 +31,9 @@ public class PreparationCompanyController {
 
     @Operation(
             operationId = "getPreparationCompanies",
-            summary = "내 준비 기업 목록 조회"
+            summary = "내 준비 기업 목록 조회",
+            description = "status를 생략하거나 ACTIVE로 지정하면 현재 준비 기업을 조회합니다. "
+                    + "EXCLUDED로 지정하면 학습 이력과 관계없이 제외한 기업 및 저장된 직무를 조회합니다."
     )
     @GetMapping
     public ResponseEntity<ApiResponse<Page>> list(
@@ -40,13 +42,23 @@ public class PreparationCompanyController {
             @RequestParam MultiValueMap<String, String> query,
             @RequestBody(required = false) byte[] body
     ) {
-        validate(query, body, Set.of("page", "size"));
+        validate(query, body, Set.of("page", "size", "status"));
+
+        CompanyStatus status;
+        try {
+            status = query.containsKey("status")
+                    ? CompanyStatus.valueOf(query.getFirst("status"))
+                    : CompanyStatus.ACTIVE;
+        } catch (IllegalArgumentException ex) {
+            throw PreparationCompany.invalid();
+        }
 
         var paging = new Paging(
                 integer(query.getFirst("page"), 0),
                 integer(query.getFirst("size"), 20));
 
-        return response(200, service.list(actor(authentication), paging));
+        return response(200,
+                service.list(actor(authentication), paging, status));
     }
 
     @Operation(

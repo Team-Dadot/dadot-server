@@ -284,6 +284,57 @@ class QuizGenerationIntegrationTest {
     }
 
     @Test
+    void numericRecallIsRemovedOnlyFromNewCandidatesAndOldPublishedQuestionIsUntouched()
+            throws Exception {
+        long previous = insert("insert into quiz_questions(company_id) values (?)", company);
+        long previousVersion = insert("""
+                insert into quiz_question_versions(question_id,company_id,version_no,status,question_text,explanation)
+                values (?,?,1,'PUBLISHED','과거 공시에 따른 매출액은 얼마인가요?','기존 해설입니다.')
+                """, previous, company);
+        jdbc.update("update quiz_questions set published_version_no=1 where id=?", previous);
+        var oldQuestion = jdbc.queryForMap("select * from quiz_questions where id=?", previous);
+        var oldVersion = jdbc.queryForMap("select * from quiz_question_versions where id=?", previousVersion);
+
+        doAnswer(invocation -> {
+            var generated = output(invocation.getArgument(0));
+            ((tools.jackson.databind.node.ObjectNode) generated.questions().get(0))
+                    .put("question", "공시에 따른 연간 수송 인원은 몇 명인가요?");
+            return generated;
+        }).when(client).generate(any());
+        var result = drain(start(3));
+        assertEquals("SUCCEEDED", result.path("status").asText());
+        assertEquals(2, result.path("createdCount").asInt());
+        assertEquals(1, result.path("rejectedCount").asInt());
+        assertFalse(result.path("targetReached").asBoolean());
+        assertEquals("INSUFFICIENT_VALID_QUESTIONS", result.path("shortfallReason").asText());
+        assertEquals(2, count("select count(*) from quiz_question_versions where company_id=? and status='DRAFT'", company));
+        assertEquals(0, count("select count(*) from quiz_generation_candidates where company_id=? and content_json like '%몇 명%'", company));
+        assertEquals(oldQuestion, jdbc.queryForMap("select * from quiz_questions where id=?", previous));
+        assertEquals(oldVersion, jdbc.queryForMap("select * from quiz_question_versions where id=?", previousVersion));
+        verify(client, times(1)).generate(any());
+    }
+
+    @Test
+    void allNumericRecallProducesNoDraftsWithoutUnboundedRegeneration() throws Exception {
+        doAnswer(invocation -> {
+            var generated = output(invocation.getArgument(0));
+            for (var question : generated.questions()) {
+                ((tools.jackson.databind.node.ObjectNode) question)
+                        .put("question", "공시에 따른 연간 수송 인원은 몇 명인가요?");
+            }
+            return generated;
+        }).when(client).generate(any());
+        var result = drain(start(3));
+        assertEquals("FAILED", result.path("status").asText());
+        assertEquals("NO_VALID_QUESTIONS", result.path("errorCode").asText());
+        assertEquals(0, result.path("createdCount").asInt());
+        assertEquals(3, result.path("rejectedCount").asInt());
+        assertEquals(0, count("select count(*) from quiz_questions where company_id=?", company));
+        assertEquals(0, count("select count(*) from quiz_generation_candidates where company_id=?", company));
+        verify(client, times(1)).generate(any());
+    }
+
+    @Test
     void oneQuestionCanRetainEvidenceFromAllThreeReports() throws Exception {
         doAnswer(invocation -> {
             Lease lease = invocation.getArgument(0);

@@ -44,6 +44,10 @@ public class OpenAiQuizClient {
             여러 문제를 만들 때 근거가 허용하는 범위에서 주제를 분산하고 같은 사실을 반복하지 않는다.
             한 문항은 기업 이해에 도움이 되는 큰 사실 하나만 묻는다. 지원 직무의 전문 시험을 만들지 않는다.
             정확한 금액·비율·수량·연도, 수치 범위 선택, 지표 비교·순위·계산을 요구하는 문제는 출제하지 않는다.
+            '승객을 몇 만 명 수송했나요?', '매출액은 얼마인가요?', '설립 연도는 무엇인가요?' 같은 수치 암기 문항은 서버에서 제외한다.
+            보기가 수량·금액·비율·연도만 다르면 제외하고, 대신 제품·서비스·고객·사업 방향 중 원문이 뒷받침하는 큰 사실을 묻는다.
+            숫자를 한글로 바꾸거나 숫자에 범위·단위를 붙여 수치 암기 문제를 우회하지 않는다.
+            5G·3M처럼 숫자를 포함한 명칭이나 문맥에 필요한 보고서 연도 자체는 금지하지 않는다. 정확한 수치를 외워야 정답을 고르는지 확인한다.
             회계·법률 용어의 정의, 법 조항·예외 규정, 전문 기술의 원리나 세부 사양을 묻지 않는다.
             낯선 용어는 뜻을 바꾸지 않는 쉬운 말로 풀어 쓴다. 어려운 용어를 아는 것이 정답의 조건이면 제외한다.
             이 사실이 이 기업을 이해하는 데 왜 필요한지 설명하기 어려우면 출제하지 않는다.
@@ -112,7 +116,8 @@ public class OpenAiQuizClient {
         return QuizGeneration.sha256(QuizGeneration.PROMPT_VERSION + INSTRUCTIONS + RETRY_INSTRUCTIONS
                 + "schema-v2:question-unbounded:server-q" + QuizGeneration.MAX_QUESTION_LENGTH
                 + ":o" + QuizGeneration.MAX_OPTION_LENGTH
-                + ":e" + QuizGeneration.MAX_EXPLANATION_LENGTH + ":q250:complete-question-retry-v1");
+                + ":e" + QuizGeneration.MAX_EXPLANATION_LENGTH + ":q250:complete-question-retry-v1:"
+                + QuizGeneration.CONTENT_POLICY_VERSION);
     }
 
     public Output generate(Lease lease) {

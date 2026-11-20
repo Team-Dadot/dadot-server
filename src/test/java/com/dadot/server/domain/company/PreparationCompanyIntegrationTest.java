@@ -142,6 +142,193 @@ class PreparationCompanyIntegrationTest {
     }
 
     @Test
+    void excludedPreparationsKeepSavedJobWithoutLearningHistory() throws Exception {
+        long second = company("저장직무복원");
+        add(key(), addBody(second, Map.of("jobId", job), today().toString()))
+                .andExpect(status().isCreated());
+        exclude(second).andExpect(status().isNoContent());
+
+        assertEquals(0, scalar(
+                "select count(*) from quiz_answers where user_id = ? and company_id = ?",
+                user, second));
+        assertEquals(0, scalar(
+                "select count(*) from interview_questions where user_id = ? and company_id = ?",
+                user, second));
+        var before = jdbc.queryForMap(
+                "select * from user_companies where user_id = ? and company_id = ?",
+                user, second);
+
+        list("?status=EXCLUDED")
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].company.companyId").value(second))
+                .andExpect(jsonPath("$.data.content[0].job.jobId").value(job))
+                .andExpect(jsonPath("$.data.content[0].job.jobName").value("백엔드"))
+                .andExpect(jsonPath("$.data.content[0].job.isCustom").value(false))
+                .andExpect(jsonPath("$.data.content[0].interviewDate").value(today().toString()))
+                .andExpect(jsonPath("$.data.content[0].selected").value(false));
+
+        assertEquals(before, jdbc.queryForMap(
+                "select * from user_companies where user_id = ? and company_id = ?",
+                user, second));
+        mvc.perform(get("/v1/reviews/companies").header("Authorization", bearer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[*].company.companyId",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem((int) second))));
+        list("").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].company.companyId").value(first));
+
+        add(key(), addBody(second, Map.of("jobId", job), null))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.job.jobId").value(job));
+        list("?status=EXCLUDED").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content").isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"마케팅", "서비스 기획 · 데이터 분석 📊"})
+    void excludedPreparationsRestoreCustomJob(String name) throws Exception {
+        long second = company("직접입력복원");
+        add(key(), addBody(second, Map.of("customName", name), null))
+                .andExpect(status().isCreated());
+        exclude(second).andExpect(status().isNoContent());
+
+        list("?status=EXCLUDED")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].job.jobId")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.content[0].job.jobName").value(name))
+                .andExpect(jsonPath("$.data.content[0].job.isCustom").value(true));
+    }
+
+    @Test
+    void excludedPreparationsReturnChangedJobOnNextReaddition() throws Exception {
+        long second = company("직무변경복원");
+        add(key(), addBody(second, Map.of("jobId", job), null))
+                .andExpect(status().isCreated());
+        exclude(second).andExpect(status().isNoContent());
+        add(key(), addBody(second, Map.of("customName", "기획"), null))
+                .andExpect(status().isCreated());
+        patch(second, "{\"version\":3,\"job\":{\"customName\":\"서비스 기획\"}}")
+                .andExpect(status().isOk());
+        exclude(second).andExpect(status().isNoContent());
+
+        list("?status=EXCLUDED")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].job.jobName").value("서비스 기획"));
+    }
+
+    @Test
+    void excludedPreparationsAreScopedToAuthenticatedUser() throws Exception {
+        long shared = company("같은기업");
+        activate(shared, null, "내 직무");
+        long foreign = account(true);
+        long foreignOnly = company("다른회원전용");
+        for (long id : List.of(shared, foreignOnly)) {
+            jdbc.update("""
+                    insert into user_companies(
+                        user_id,company_id,custom_job_name,excluded_at)
+                    values (?,?, '다른회원 직무', ?)
+                    """, foreign, id, utc(now));
+        }
+
+        list("?status=EXCLUDED").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].company.companyId").value(shared))
+                .andExpect(jsonPath("$.data.content[0].job.jobName").value("내 직무"));
+        login(foreign);
+        list("?status=EXCLUDED").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.content[*].job.jobName")
+                        .value(org.hamcrest.Matchers.everyItem(
+                                org.hamcrest.Matchers.is("다른회원 직무"))));
+    }
+
+    @Test
+    void excludedPreparationsHaveStablePagingAndDoNotIncludeActiveCompanies() throws Exception {
+        long earlier = company("동일이름");
+        long later = company("동일이름");
+        activate(earlier, null, "기획");
+        activate(later, null, "개발");
+
+        list("?status=EXCLUDED&size=1")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].company.companyId").value(earlier))
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value(2))
+                .andExpect(jsonPath("$.data.hasNext").value(true));
+        list("?status=EXCLUDED&page=1&size=1")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].company.companyId").value(later))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+        list("?status=EXCLUDED&page=2147483647&size=100")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content").isEmpty())
+                .andExpect(jsonPath("$.data.totalElements").value(2));
+    }
+
+    @Test
+    void excludedPreparationsReturnEmptyPageForNewUser() throws Exception {
+        list("?status=EXCLUDED").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content").isEmpty())
+                .andExpect(jsonPath("$.data.totalElements").value(0))
+                .andExpect(jsonPath("$.data.totalPages").value(0))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+    }
+
+    @Test
+    void explicitActiveStatusMatchesExistingList() throws Exception {
+        long excluded = company("제외기업");
+        activate(excluded, null, "기획");
+        String existing = list("").andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertEquals(existing, list("?status=ACTIVE").andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+    }
+
+    @Test
+    void excludedPreparationsPreserveInactiveCatalogJobWithoutAllowingReaddition()
+            throws Exception {
+        long second = company("과거직무");
+        add(key(), addBody(second, Map.of("jobId", job), null))
+                .andExpect(status().isCreated());
+        exclude(second).andExpect(status().isNoContent());
+        jdbc.update("update jobs set is_active = false where id = ?", job);
+
+        list("?status=EXCLUDED").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].job.jobId").value(job))
+                .andExpect(jsonPath("$.data.content[0].job.jobName").value("백엔드"));
+        add(key(), addBody(second, Map.of("jobId", job), null))
+                .andExpect(status().isNotFound());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "ALL", "active", "EXCLUDED&status=ACTIVE"})
+    void excludedPreparationsRejectInvalidStatus(String statusValue) throws Exception {
+        list("?status=" + statusValue).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void excludedPreparationsRequireLiveAuthenticatedSession() throws Exception {
+        mvc.perform(get(PATH + "?status=EXCLUDED"))
+                .andExpect(status().isUnauthorized());
+        jdbc.update("update auth_sessions set revoked_at = ? where id = ?",
+                utc(now), session);
+        list("?status=EXCLUDED").andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void excludedPreparationsTranslateStorageFailure() throws Exception {
+        doThrow(new TransientDataAccessResourceException("temporary failure"))
+                .when(repository).excludedCount(user);
+        list("?status=EXCLUDED")
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code").value("SERVICE_UNAVAILABLE"));
+    }
+
+    @Test
     void listsOnlyOwnActiveCompaniesInSlotOrderWithRealPaging() throws Exception {
         long second = company("가나다");
         activate(second, 2, "기획");

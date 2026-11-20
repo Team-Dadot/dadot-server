@@ -1,7 +1,9 @@
 package com.dadot.server.domain.company.repository;
 
 import com.dadot.server.domain.company.model.PreparationCompany;
+import com.dadot.server.domain.company.model.PreparationCompany.CompanyStatus;
 import com.dadot.server.domain.company.model.PreparationCompany.JobInput;
+import com.dadot.server.domain.company.model.PreparationCompany.Paging;
 import com.dadot.server.domain.company.model.PreparationCompany.QuizToday;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
@@ -56,6 +58,26 @@ public class PreparationCompanyRepository {
     }
 
     public List<Row> rows(long user) {
+        return rows(user, CompanyStatus.ACTIVE, null);
+    }
+
+    public long excludedCount(long user) {
+        return Objects.requireNonNull(jdbc.queryForObject("""
+                select count(*) from user_companies
+                where user_id = ? and active_slot is null
+                """, Long.class, user));
+    }
+
+    public List<Row> excludedRows(long user, Paging paging) {
+        return rows(user, CompanyStatus.EXCLUDED,
+                Objects.requireNonNull(paging));
+    }
+
+    private List<Row> rows(long user, CompanyStatus status, Paging paging) {
+        Object[] args = paging == null
+                ? new Object[]{user}
+                : new Object[]{user, paging.size(), paging.offset()};
+
         return jdbc.query("""
                 select uc.company_id, c.name, c.industry, c.logo_key, uc.job_id,
                     coalesce(uc.custom_job_name, j.name), uc.interview_date,
@@ -64,9 +86,13 @@ public class PreparationCompanyRepository {
                 join companies c on c.id = uc.company_id
                 left join jobs j on j.id = uc.job_id
                 left join user_preferences p on p.user_id = uc.user_id
-                where uc.user_id = ? and uc.active_slot is not null
-                order by uc.active_slot
-                """,
+                where uc.user_id = ? and
+                """ + (status == CompanyStatus.ACTIVE
+                        ? "uc.active_slot is not null"
+                        : "uc.active_slot is null") + """
+
+                order by uc.active_slot, c.name, uc.company_id
+                """ + (paging == null ? "" : " limit ? offset ?"),
                 (rs, n) -> new Row(
                         rs.getLong(1),
                         rs.getString(2),
@@ -77,7 +103,7 @@ public class PreparationCompanyRepository {
                         rs.getObject(7, LocalDate.class),
                         rs.getBoolean(8),
                         rs.getLong(9)),
-                user);
+                args);
     }
 
     // 최대 5개 기업의 당일 세트·답안 수를 한 번에 조회한다. 과거 이력은 집계하지 않는다.

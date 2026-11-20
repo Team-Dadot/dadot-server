@@ -239,6 +239,21 @@ class OpenAiQuizClientTest {
         assertFalse(question.has("maxLength"));
     }
 
+    @Test
+    void requestsBusinessUnderstandingInsteadOfNumericRecallOnBothAttempts() {
+        var first = lease(client);
+        for (int attempt : List.of(1, 2)) {
+            var current = new Lease(first.taskId(), first.companyId(), first.userId(), first.owner(), first.fence(),
+                    first.runId(), first.batchNo(), attempt, first.questionCount(), first.batchCount(),
+                    first.questionsPerBatch(), first.maxOutputTokens(), first.model(), first.promptVersion(), first.input());
+            client.generate(current);
+            String instructions = received.get().path("instructions").asText();
+            assertTrue(instructions.contains("수치 암기 문항은 서버에서 제외한다"));
+            assertTrue(instructions.contains("숫자를 한글로 바꾸거나"));
+            assertTrue(instructions.contains("5G·3M"));
+        }
+    }
+
     private OpenAiQuizClient client(Duration timeout) {
         return new OpenAiQuizClient(mapper, new QuizGenerationProperties(true, false, "gpt-6-luna",
                 "test-key-".repeat(4), 4096, 3000000, 500), HttpClient.newHttpClient(),

@@ -20,6 +20,8 @@ import java.util.regex.Pattern;
 
 public final class QuizGeneration {
     public static final String PROMPT_VERSION = "quiz-bank-v1";
+    // 생성 검증 정책이 바뀌면 버전도 변경해 진행 중 작업과 구분한다.
+    public static final String CONTENT_POLICY_VERSION = "no-numeric-recall-v1";
     // 새 AI 생성 문항에만 적용한다. 기존 문제은행의 저장·조회 계약은 유지한다.
     public static final int MAX_QUESTION_LENGTH = 45;
     public static final int MAX_OPTION_LENGTH = 20;
@@ -30,6 +32,24 @@ public final class QuizGeneration {
     private static final Pattern OPTION_WHITESPACE = Pattern.compile("[\\p{Z}\\s]+");
     private static final Pattern OPTION_PUNCTUATION = Pattern.compile(
             "[\\p{P}&&[^.,]]|(?<!\\p{Nd})[.,]|[.,](?!\\p{Nd})");
+    private static final Pattern NUMERIC_QUESTION = Pattern.compile(
+            "몇[십백천만억조]*(?:퍼센트|개월|시간|명|원|달러|개|건|대|곳|회|년|월|일|분|초|톤|배|위|%)"
+                    + "|(?:매출액?|영업이익|순이익|자산|부채|자본금|투자액|판매량|생산량|수송인원|승객수|직원수|비율|비중|점유율|규모)"
+                    + ".{0,12}(?:얼마|어느정도|어느수준)"
+                    + "|(?:수치|숫자|금액|비율|수량|연도)(?:은|는|이|가)?(?:얼마|몇|무엇)"
+                    + "|(?:설립|창립|상장|준공|개장)(?:된|한)?(?:연도|일자|시기)(?:은|는|이|가)?(?:언제|몇|무엇|어느)"
+                    + "|(?:설립|창립|상장|준공|개장).{0,8}언제"
+                    + "|계산하면|계산한값|합산하면|더하면|빼면|곱하면|나누면");
+    private static final String QUANTITY_VALUE =
+            "[+-]?(?:[0-9]+(?:[.,][0-9]+)*|[영공일이삼사오육칠팔구십백천만억조]+"
+                    + "|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)[십백천만억조]*";
+    private static final String QUANTITY_UNIT =
+            "(?:퍼센트|개월|시간|달러|유로|킬로그램|킬로미터|제곱미터|미터|리터|kg|km|m2|ha|명|원|개|건|대|곳|회|년|월|일|분|초|톤|배|위|%)?";
+    private static final Pattern NUMERIC_OPTION = Pattern.compile(
+            "(?:약|대략|최대|최소|전년대비|전년동기대비)?"
+                    + QUANTITY_VALUE + QUANTITY_UNIT
+                    + "(?:(?:~|∼|–|-|부터)" + QUANTITY_VALUE + QUANTITY_UNIT + "(?:까지)?)?"
+                    + "(?:이상|이하|초과|미만|내외|정도|가량|수준|증가|감소|초|중|말)?");
 
     private QuizGeneration() {}
 
@@ -119,6 +139,7 @@ public final class QuizGeneration {
                     validText(option.text(), MAX_OPTION_LENGTH);
                     if (!options.add(normalizeOption(option.text()))) throw QuizBank.invalid();
                 }
+                if (numericRecall(content)) throw QuizBank.invalid();
                 boolean primaryEvidence = false;
                 for (var evidence : content.evidence()) {
                     validText(evidence.quote(), 250);
@@ -188,6 +209,20 @@ public final class QuizGeneration {
                 .toLowerCase(Locale.ROOT)).replaceAll("");
         // 보기의 숫자 사이 .와 ,만 보존한다. 기존 문항 fingerprint 정규화는 유지한다.
         return OPTION_PUNCTUATION.matcher(compact).replaceAll("");
+    }
+
+    private static boolean numericRecall(QuizBank.Content content) {
+        // 판별에만 정규화한다. 원문·인용·저장 문구 및 기존 fingerprint는 바꾸지 않는다.
+        if (NUMERIC_QUESTION.matcher(compact(content.question())).find()) return true;
+        // 숫자가 들어간 5G·3M 등의 이름은 수량만으로 된 보기와 구분한다.
+        return content.options().stream()
+                .filter(option -> NUMERIC_OPTION.matcher(compact(option.text())).matches())
+                .count() >= 3;
+    }
+
+    private static String compact(String value) {
+        return OPTION_WHITESPACE.matcher(Normalizer.normalize(value, Normalizer.Form.NFKC))
+                .replaceAll("").toLowerCase(Locale.ROOT);
     }
 
     public static String fingerprint(String question) {

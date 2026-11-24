@@ -476,7 +476,9 @@ class InterviewGenerationLengthRetryTest {
         );
 
         return new InterviewGenerationWorker(
-                repository, client, properties, clock, manager
+                repository, client, properties, clock, manager,
+                new com.dadot.server.domain.interview.support.InterviewGenerationCapacity(3, 20),
+                new org.springframework.core.task.SyncTaskExecutor()
         );
     }
 }

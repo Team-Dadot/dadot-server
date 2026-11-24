@@ -59,6 +59,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class InterviewGenerationIntegrationTest {
+    @Autowired org.springframework.context.ApplicationContext context;
     @Autowired JdbcTemplate jdbc;
     @Autowired MockMvc mvc;
     @Autowired JsonMapper mapper;
@@ -1302,6 +1303,203 @@ class InterviewGenerationIntegrationTest {
                         .contentType("application/json")
                         .content(body)
         ).andExpect(status().isBadRequest());
+    }
+
+
+    @Test
+    void threeUsersCanHoldLeasesButFourthWaitsUntilAResultIsSaved() throws Exception {
+        String a = accepted();
+        String b = acceptedForAnotherUser();
+        String c = acceptedForAnotherUser();
+        String d = acceptedForAnotherUser();
+        assertEquals(3, context.getBean(com.dadot.server.domain.interview.support.InterviewGenerationCapacity.class).maxConcurrent());
+        var tx = new TransactionTemplate(manager);
+        var first = tx.execute(t -> repository.claim(clock.instant()));
+        gate();
+        var second = tx.execute(t -> repository.claim(clock.instant()));
+        assertNotNull(first);
+        assertNotNull(second, "다른 사용자의 질문은 첫 AI 응답 전에 실행할 수 있어야 한다");
+        assertNotEquals(first.taskId(), second.taskId());
+        gate();
+        var third = tx.execute(t -> repository.claim(clock.instant()));
+        assertNotNull(third);
+        assertEquals(c, third.taskId());
+        gate();
+        assertNull(tx.execute(t -> repository.claim(clock.instant())), "전역 동시 실행 3건 제한");
+        assertEquals(3, liveGenerationLeases());
+        Lease input = tx.execute(t -> repository.load(first, clock.instant()));
+        tx.executeWithoutResult(t -> repository.save(first, output(input), clock.instant()));
+        gate();
+        var fourth = tx.execute(t -> repository.claim(clock.instant()));
+        assertNotNull(fourth);
+        assertEquals(d, fourth.taskId());
+        assertEquals("SUCCEEDED", state(a));
+        assertEquals("PROCESSING", state(b));
+        assertEquals(3, liveGenerationLeases());
+    }
+
+    @Test
+    void concurrentClaimersAcrossInstancesCannotExceedGlobalLimit() throws Exception {
+        for (int i = 0; i < 8; i++) {
+            if (i == 0) accepted(); else acceptedForAnotherUser();
+        }
+        try (var pool = Executors.newFixedThreadPool(8)) {
+            var start = new CountDownLatch(1);
+            var calls = new ArrayList<java.util.concurrent.Future<InterviewGenerationRepository.Claim>>();
+            for (int i = 0; i < 8; i++) calls.add(pool.submit(() -> {
+                assertTrue(start.await(5, TimeUnit.SECONDS));
+                var tx = new TransactionTemplate(manager);
+                return tx.execute(t -> {
+                    // 시작 간격만 테스트에서 해제. 같은 control 행 잠금 아래 선점 경쟁을 검증한다.
+                    gate();
+                    return repository.claim(clock.instant());
+                });
+            }));
+            start.countDown();
+            var claimed = new java.util.HashSet<String>();
+            for (var call : calls) {
+                var claim = call.get(10, TimeUnit.SECONDS);
+                if (claim != null) assertTrue(claimed.add(claim.taskId()));
+            }
+            assertEquals(3, claimed.size());
+            assertEquals(3, liveGenerationLeases());
+            assertEquals(3, count("select count(*) from ai_task_runs r join ai_tasks t on t.id=r.task_id where t.company_id=?", company));
+        }
+    }
+
+    @Test
+    void concurrentClaimersCannotRunTheSameTaskTwice() throws Exception {
+        accepted();
+        try (var pool = Executors.newFixedThreadPool(4)) {
+            var calls = new ArrayList<java.util.concurrent.Future<InterviewGenerationRepository.Claim>>();
+            for (int i = 0; i < 4; i++) calls.add(pool.submit(() ->
+                    new TransactionTemplate(manager).execute(t -> { gate(); return repository.claim(clock.instant()); })));
+            int claimed = 0;
+            for (var call : calls) if (call.get(10, TimeUnit.SECONDS) != null) claimed++;
+            assertEquals(1, claimed);
+            assertEquals(1, liveGenerationLeases());
+        }
+    }
+
+    @Test
+    void sharedCallStartIntervalStillAppliesWithMultipleAvailableSlots() throws Exception {
+        accepted(); acceptedForAnotherUser();
+        var tx = new TransactionTemplate(manager);
+        var now = clock.instant();
+        assertNotNull(tx.execute(t -> repository.claim(now)));
+        assertNull(tx.execute(t -> repository.claim(now)), "새 슬롯이 있어도 기존 초당 접수 간격 유지");
+        assertNotNull(tx.execute(t -> repository.claim(now.plusSeconds(2))));
+    }
+
+    @Test
+    void outstandingAdmissionCountsQueuedAndRunningTasksTogether() throws Exception {
+        String first = accepted();
+        var tx = new TransactionTemplate(manager);
+        assertNotNull(tx.execute(t -> repository.claim(clock.instant())));
+        for (int i = 0; i < 19; i++) jdbc.update("""
+                insert into ai_tasks(id,user_id,company_id,type,status,context_id,policy_version_id,
+                    request_key_hash,request_body_hmac)
+                select ?,user_id,company_id,type,'PROCESSING',context_id,policy_version_id,?,request_body_hmac
+                from ai_tasks where id=?
+                """, key(), InterviewGeneration.sha256(key()), first);
+        long other = account();
+        jdbc.update("insert into user_companies(user_id,company_id,active_slot,custom_job_name) values (?,?,1,'해외영업')", other, company);
+        error(create(key(), login(other)), 503, "SERVICE_UNAVAILABLE");
+        assertEquals(20, count("select count(*) from ai_tasks where company_id=?", company));
+        assertEquals(1, liveGenerationLeases());
+    }
+
+    @Test
+    void threeRealWorkersOverlapAiCallsWithoutKeepingTransactionsOpen() throws Exception {
+        String a = accepted();
+        String b = acceptedForAnotherUser();
+        String c = acceptedForAnotherUser();
+        var firstEntered = new CountDownLatch(1);
+        var secondEntered = new CountDownLatch(1);
+        var allEntered = new CountDownLatch(3);
+        var release = new CountDownLatch(1);
+        var active = new java.util.concurrent.atomic.AtomicInteger();
+        var maximum = new java.util.concurrent.atomic.AtomicInteger();
+        var txOpen = new java.util.concurrent.atomic.AtomicBoolean();
+        doAnswer(invocation -> {
+            Lease lease = invocation.getArgument(0);
+            if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) txOpen.set(true);
+            int current = active.incrementAndGet();
+            maximum.accumulateAndGet(current, Math::max);
+            firstEntered.countDown();
+            if (current == 2) secondEntered.countDown();
+            allEntered.countDown();
+            try { assertTrue(release.await(15, TimeUnit.SECONDS)); return output(lease); }
+            finally { active.decrementAndGet(); }
+        }).when(client).generate(any());
+        try (var pool = Executors.newFixedThreadPool(4)) {
+            var calls = new ArrayList<java.util.concurrent.Future<?>>();
+            try {
+                calls.add(pool.submit(worker::runOnce));
+                assertTrue(firstEntered.await(5, TimeUnit.SECONDS));
+                gate();
+                calls.add(pool.submit(worker::runOnce));
+                assertTrue(secondEntered.await(5, TimeUnit.SECONDS));
+                gate();
+                calls.add(pool.submit(worker::runOnce));
+                assertTrue(allEntered.await(5, TimeUnit.SECONDS));
+                assertEquals(3, maximum.get());
+                assertFalse(txOpen.get());
+                assertEquals(3, liveGenerationLeases());
+                gate();
+                pool.submit(worker::runOnce).get(3, TimeUnit.SECONDS);
+                verify(client, times(3)).generate(any());
+            } finally {
+                release.countDown();
+                for (var call : calls) call.get(5, TimeUnit.SECONDS);
+            }
+        }
+        assertEquals("SUCCEEDED", state(a));
+        assertEquals("SUCCEEDED", state(b));
+        assertEquals("SUCCEEDED", state(c));
+        assertEquals(3, count("select count(*) from interview_questions where company_id=?", company));
+    }
+
+    @Test
+    void configuredSingleGlobalSlotStillBlocksOtherInstances() throws Exception {
+        accepted(); acceptedForAnotherUser();
+        var single = capacityRepository(1, 20);
+        var tx = new TransactionTemplate(manager);
+        assertNotNull(tx.execute(t -> single.claim(clock.instant())));
+        gate();
+        assertNull(tx.execute(t -> single.claim(clock.instant())));
+        assertEquals(1, liveGenerationLeases());
+    }
+
+    @Test
+    void configuredOutstandingLimitRejectsAtThreeWithoutChangingHourlyLimit() throws Exception {
+        accepted(); acceptedForAnotherUser(); acceptedForAnotherUser();
+        var limited = capacityRepository(2, 3);
+        var tx = new TransactionTemplate(manager);
+        var error = assertThrows(com.dadot.server.global.exception.BusinessException.class,
+                () -> tx.executeWithoutResult(t -> limited.admission(user, clock.instant())));
+        assertEquals(com.dadot.server.global.exception.ErrorCode.SERVICE_UNAVAILABLE, error.getErrorCode());
+        assertEquals(3, count("select count(*) from ai_tasks where company_id=?", company));
+    }
+
+    private InterviewGenerationRepository capacityRepository(int concurrent, int outstanding) {
+        return new InterviewGenerationRepository(jdbc, mapper,
+                context.getBean(com.dadot.server.domain.auth.support.VerificationCrypto.class),
+                context.getBean(com.dadot.server.domain.interview.repository.InterviewSourceRepository.class),
+                reads, new com.dadot.server.domain.interview.support.InterviewGenerationCapacity(concurrent, outstanding));
+    }
+
+    private String acceptedForAnotherUser() throws Exception {
+        long another = account();
+        jdbc.update("insert into user_companies(user_id,company_id,active_slot,custom_job_name) values (?,?,1,'해외영업')", another, company);
+        return data(create(key(), login(another)).andExpect(status().isAccepted())).get("taskId").asText();
+    }
+
+    private long liveGenerationLeases() {
+        return count("""
+                select count(*) from ai_tasks where company_id=? and type='INTERVIEW_GENERATION'
+                and status='PROCESSING' and lease_until>utc_timestamp(6)
+                """, company);
     }
 
     private void consume(

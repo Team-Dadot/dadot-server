@@ -4,6 +4,7 @@ import com.dadot.server.domain.auth.support.VerificationCrypto;
 import com.dadot.server.domain.interview.model.InterviewGeneration;
 import com.dadot.server.domain.interview.model.InterviewGeneration.*;
 import com.dadot.server.domain.interview.model.InterviewPolicy;
+import com.dadot.server.domain.interview.support.InterviewGenerationCapacity;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ public class InterviewGenerationRepository {
     private final VerificationCrypto crypto;
     private final InterviewSourceRepository sources;
     private final InterviewReadRepository reads;
+    private final InterviewGenerationCapacity capacity;
 
     public record RequestKey(
             String scope, String operation, String key, String body
@@ -171,7 +173,7 @@ public class InterviewGenerationRepository {
         if (count("""
                 select count(*) from ai_tasks
                 where type = 'INTERVIEW_GENERATION' and status = 'PROCESSING'
-                """) >= 20) {
+                """) >= capacity.maxOutstanding()) {
             throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE);
         }
 
@@ -271,7 +273,7 @@ public class InterviewGenerationRepository {
                 select count(*) from ai_tasks
                 where type = 'INTERVIEW_GENERATION'
                   and status = 'PROCESSING' and lease_until > ?
-                """, utc(now)) != 0) {
+                """, utc(now)) >= capacity.maxConcurrent()) {
             return null;
         }
 

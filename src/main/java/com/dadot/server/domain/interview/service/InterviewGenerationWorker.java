@@ -3,17 +3,22 @@ package com.dadot.server.domain.interview.service;
 import com.dadot.server.domain.interview.model.InterviewGeneration.*;
 import com.dadot.server.domain.interview.repository.InterviewGenerationRepository;
 import com.dadot.server.domain.interview.support.InterviewGenerationProperties;
+import com.dadot.server.domain.interview.support.InterviewGenerationCapacity;
 import com.dadot.server.global.exception.BusinessException;
 import com.dadot.server.infrastructure.openai.OpenAiInterviewClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
 
 @Component
 public class InterviewGenerationWorker {
@@ -26,18 +31,24 @@ public class InterviewGenerationWorker {
     private final InterviewGenerationProperties properties;
     private final Clock clock;
     private final TransactionTemplate write;
+    private final TaskExecutor executor;
+    private final Semaphore slots;
 
     public InterviewGenerationWorker(
             InterviewGenerationRepository repository,
             OpenAiInterviewClient client,
             InterviewGenerationProperties properties,
             Clock clock,
-            PlatformTransactionManager manager
+            PlatformTransactionManager manager,
+            InterviewGenerationCapacity capacity,
+            @Qualifier("interviewGenerationExecutor") TaskExecutor executor
     ) {
         this.repository = repository;
         this.client = client;
         this.properties = properties;
         this.clock = clock;
+        this.executor = executor;
+        this.slots = new Semaphore(capacity.maxConcurrent());
 
         write = new TransactionTemplate(manager);
         write.setTimeout(15);
@@ -55,13 +66,26 @@ public class InterviewGenerationWorker {
             return;
         }
 
+        // 슬롯을 확보한 실행 스레드에서만 DB 작업을 선점한다.
+        // 실행기가 포화·종료 상태이면 선점하지 않아 DB의 대기 작업과 시도 횟수를 보존한다.
+        if (!slots.tryAcquire()) {
+            return;
+        }
         try {
-            runOnce();
-        } catch (RuntimeException ex) {
-            log.error(
-                    "Interview generation storage failure type={}",
-                    ex.getClass().getSimpleName()
-            );
+            executor.execute(() -> {
+                try {
+                    runOnce();
+                } catch (RuntimeException ex) {
+                    log.error("Interview generation storage failure type={}",
+                            ex.getClass().getSimpleName());
+                } finally {
+                    slots.release();
+                }
+            });
+        } catch (RejectedExecutionException ex) {
+            slots.release();
+            // 다음 tick에서 DB에 남아 있는 작업을 다시 확인한다.
+            log.debug("Interview generation executor unavailable");
         }
     }
 

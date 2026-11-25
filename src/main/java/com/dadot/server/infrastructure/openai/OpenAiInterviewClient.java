@@ -73,14 +73,11 @@ public class OpenAiInterviewClient {
             """;
 
     private static final String RETRY_INSTRUCTIONS = """
-            이번 요청은 재시도다. coreQuestion의 의도를 유지하며 질문과 근거 해석을 전체적으로 다시 작성한다.
-            previousQuestions의 질문을 어미만 바꾸어 재출력하지 않는다. 선택된 유형과 바로 전 유형을 혼동하지 않는다.
-            특정 직무명·억지 연결 문구·경쟁사 비교를 빼고, 기본 질문을 자연스럽게 묻는다.
-            각 interpretation도 해당 quote에만 근거해 최대 180자, 완결된 설명문 1~2개로 작성한다.
-            질문은 신입 수준의 쉬운 존댓말 한 문장으로 공백 포함 20~40자 권장, 반드시 최대 60자 안에서 완성한다.
-            질문을 먼저 완결한 다음 길이를 확인한다. 길면 배경 설명부터 줄이고 문장 중간을 자르지 않는다.
-            '무엇인가요?', '생각하시나요?', '말해 주세요.', '설명해 보세요.', '말씀해 주십시오.' 등으로 자연스럽게 끝낸다.
-            단어·조사·어미 중간에서 끝내지 않는다. 길이를 줄이려고 전문 용어를 쓰거나 난도를 높이지 않는다.
+            이번 요청은 재시도다. question은 입력 coreQuestion.question과 공백·문장부호까지 정확히 같게 출력한다.
+            직무명·회사명·사업 배경을 추가하거나 질문을 줄이거나 바꾸지 않는다. 질문의 허용값은 JSON 스키마에도 고정되어 있다.
+            previousQuestions와 다른 유형의 기본 질문은 서버가 선택한다. 선택된 핵심 질문을 다른 표현으로 바꾸지 않는다.
+            evidence와 interpretation은 선택된 공시 원문에 근거해 새로 작성한다.
+            각 interpretation은 해당 quote에만 근거해 최대 180자, 완결된 설명문 1~2개로 작성한다.
             """;
 
     private final JsonMapper mapper;
@@ -135,7 +132,7 @@ public class OpenAiInterviewClient {
                 InterviewGeneration.PROMPT_VERSION
                         + INSTRUCTIONS + RETRY_INSTRUCTIONS + rules + InterviewQuestionPolicy.signature()
                         + "schema-v2:question-unbounded:server-q" + InterviewGeneration.MAX_QUESTION_LENGTH
-                        + ":length-ending-retry-v2:quote500:interpretation180-v1:low:4096"
+                        + ":core-exact-retry-v3:quote500:interpretation180-v1:low:4096"
         );
     }
 
@@ -167,7 +164,7 @@ public class OpenAiInterviewClient {
                                 "type", "json_schema",
                                 "name", "interview_question",
                                 "strict", true,
-                                "schema", schema()
+                                "schema", schema(retry ? InterviewQuestionPolicy.core(input).question() : null)
                         )
                 )
         );
@@ -344,13 +341,17 @@ public class OpenAiInterviewClient {
                         )
                         .readTree(json);
 
-                return new Output(
-                        InterviewQuestionPolicy.validateQuestion(
-                                InterviewGeneration.validateComplete(InterviewGeneration.validate(value, prepared)),
-                                prepared
-                        ),
-                        metadata
+                Generated generated = InterviewQuestionPolicy.validateQuestion(
+                        InterviewGeneration.validateComplete(InterviewGeneration.validate(value, prepared)),
+                        prepared
                 );
+                // 제공자의 스키마 강제 여부와 무관하게 서버에서도 재시도 계약을 확인한다.
+                if (lease.attempt() > 1
+                        && !InterviewQuestionPolicy.core(prepared).question().equals(generated.question())) {
+                    throw new Failure("QUESTION_GENERATION_FAILED", false, 0, metadata,
+                            "QUESTION_POLICY_RETRY_MISMATCH");
+                }
+                return new Output(generated, metadata);
             } catch (Failure ex) {
                 throw ex.metadata() != null
                         ? ex
@@ -448,7 +449,7 @@ public class OpenAiInterviewClient {
         );
     }
 
-    private static Object schema() {
+    private static Object schema(String retryQuestion) {
         var id = Map.<String, Object>of(
                 "type", "integer",
                 "minimum", 1,
@@ -464,10 +465,9 @@ public class OpenAiInterviewClient {
         ));
 
         return object(Map.of(
-                "question", Map.of(
-                        "type", "string",
-                        "minLength", 1
-                ),
+                "question", retryQuestion == null
+                        ? Map.of("type", "string", "minLength", 1)
+                        : Map.of("type", "string", "enum", List.of(retryQuestion)),
                 "evidence", array(evidence, 1, 3)
         ));
     }

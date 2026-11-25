@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 
 /** 공시 적격성·핵심 질문·새 AI 질문의 허용 범위를 같은 정책으로 관리한다. */
 public final class InterviewQuestionPolicy {
-    private static final String VERSION = "business-core-questions-v2-recency";
+    private static final String VERSION = "business-core-questions-v3-job-context";
     private static final List<String> EXCLUDED_HEADINGS = List.of(
             "재무제표", "회계정책", "회계추정", "작성기준", "작성의기준", "주석", "감사보고서",
             "법적고지", "위험고지", "투자위험", "우발채무", "재무위험", "금융상품",
@@ -106,7 +106,7 @@ public final class InterviewQuestionPolicy {
     public static Generated validateQuestion(Generated generated, Input input) {
         String text = normalize(generated.question());
         String job = input.job() == null ? "" : normalize(input.job().jobName());
-        if (usesJobName(generated.question(), text, job)) throw unsuitable("QUESTION_POLICY_JOB_NAME");
+        if (usesJobName(generated.question(), job, input)) throw unsuitable("QUESTION_POLICY_JOB_NAME");
         if (UNSUPPORTED_QUESTION_WORDS.stream().anyMatch(text::contains)) {
             throw unsuitable("QUESTION_POLICY_UNSUPPORTED_CONTEXT");
         }
@@ -129,18 +129,36 @@ public final class InterviewQuestionPolicy {
         return new Failure("QUESTION_GENERATION_FAILED", false, 0, null, reason);
     }
 
-    private static boolean usesJobName(String question, String compact, String job) {
+    private static boolean usesJobName(String question, String job, Input input) {
         if (job.length() < 2) return false;
-        if (compact.contains(job + "직무") || compact.contains(job + "업무") || compact.contains(job + "담당")) return true;
-        // '개발' 지원자에게 '연구개발 활동'을 묻는 정상 사업 질문까지 부분 일치로 막지 않는다.
+        Pattern name = jobNamePattern(job);
+        String raw = Normalizer.normalize(question, Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
+        var mentions = name.matcher(raw);
+        boolean mentioned = false;
+        while (mentions.find()) {
+            mentioned = true;
+            String suffix = normalize(raw.substring(mentions.end()));
+            // 사업 용어와 같더라도 지원 직무를 직접 지칭하는 표현은 거절한다.
+            if (suffix.startsWith("직무") || suffix.startsWith("업무") || suffix.startsWith("담당")
+                    || suffix.startsWith("에지원") || suffix.startsWith("로지원")
+                    || suffix.startsWith("으로지원") || suffix.startsWith("지원자")) return true;
+        }
+        if (!mentioned) return false;
+        // '물류'·'생산'처럼 실제 선택된 공시에도 나오는 사업 표현은 직무명만으로 막지 않는다.
+        return input.sections().stream().filter(InterviewQuestionPolicy::eligible)
+                .noneMatch(section -> name.matcher(Normalizer.normalize(
+                        section.content(), Normalizer.Form.NFKC).toLowerCase(Locale.ROOT)).find());
+    }
+
+    private static Pattern jobNamePattern(String job) {
         var token = new StringBuilder();
         job.codePoints().forEach(cp -> {
             if (!token.isEmpty()) token.append("\\s*");
             token.append(Pattern.quote(new String(Character.toChars(cp))));
         });
-        String raw = Normalizer.normalize(question, Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
+        // 접두 부분 일치로 '개발'과 '연구개발 업무'를 혼동하지 않는다.
         return Pattern.compile("(?U)(?<![\\p{L}\\p{N}])" + token
-                + "(?=$|[\\s,.?!。？！]|[은는이가을를에의와과로])").matcher(raw).find();
+                + "(?=$|[\\s,.?!。？！]|[은는이가을를에의와과로]|직무|업무|담당|지원자)");
     }
 
     private static Input withSections(Input input, List<Section> sections) {
